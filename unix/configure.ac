@@ -205,7 +205,7 @@ if test "x$enable_zip" = "xyes"; then
 	if test "x$snes9x_cv_zlib" = "xyes"; then
 		S9XZIP="S9XZIP=1"
 		S9XDEFS="$S9XDEFS -DUNZIP_SUPPORT"
-		if test "x$enable_gzip" = "xno"; then 
+		if test "x$enable_gzip" = "xno"; then
 			S9XLIBS="$S9XLIBS -lz"
 		fi
 	else
@@ -295,7 +295,7 @@ AC_CHECK_HEADERS([unistd.h sys/socket.h])
 
 if test "x$snes9x_have_stdint_h" = "x"; then
 	AC_MSG_CHECKING([whether the size of pointer is int])
-	
+
 	AC_TRY_RUN(
 	[
 		int main (void)
@@ -304,7 +304,7 @@ if test "x$snes9x_have_stdint_h" = "x"; then
 		}
 	],
 	[snes9x_ptr_is_int="yes"], [snes9x_ptr_is_int="no"])
-	
+
 	if test "x$snes9x_ptr_is_int" = "xyes"; then
 		AC_MSG_RESULT(yes)
 	else
@@ -330,7 +330,7 @@ AC_DEFUN([AC_S9X_CHECK_SAR],
 		typedef int16_t			int16;
 		typedef int32_t			int32;
 		typedef int64_t			int64;
-		#else 
+		#else
 		typedef signed char		int8;
 		typedef signed short	int16;
 		typedef signed int		int32;
@@ -393,12 +393,22 @@ if test "x$enable_sound" = "xyes"; then
 	fi
 fi
 
+snes9x_have_alsa_h="";
 if test "x$enable_sound" = "xyes"; then
-	AC_CHECK_HEADER([pthread.h],
+	AC_CHECK_HEADER([alsa/asoundlib.h],
 	[
-		S9XDEFS="$S9XDEFS -DUSE_THREADS"
-		S9XLIBS="$S9XLIBS -lpthread"
+		S9XDEFS="$S9XDEFS -DUSE_ALSA"
+		S9XLIBS="$S9XLIBS -lasound"
+		snes9x_have_alsa_h="yes"
 	])
+
+	if test "x$snes9x_have_alsa_h" = "x"; then
+		AC_CHECK_HEADER([pthread.h],
+		[
+			S9XDEFS="$S9XDEFS -DUSE_THREADS"
+			S9XLIBS="$S9XLIBS -lpthread"
+		])
+	fi
 else
 	S9XDEFS="$S9XDEFS -DNOSOUND"
 fi

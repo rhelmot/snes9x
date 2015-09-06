@@ -175,7 +175,6 @@
   Nintendo Co., Limited and its subsidiary companies.
  ***********************************************************************************/
 
-
 #include <stdlib.h>
 #include <unistd.h>
 #include <ctype.h>
@@ -198,8 +197,12 @@
 #include <sys/ioctl.h>
 #endif
 #ifndef NOSOUND
+#ifdef USE_ALSA
+#include <alsa/asoundlib.h>
+#else
 #include <sys/soundcard.h>
 #include <sys/mman.h>
+#endif
 #endif
 #ifdef JOYSTICK_SUPPORT
 #include <linux/joystick.h>
@@ -294,6 +297,9 @@ struct SoundStatus
 
 static SUnixSettings	unixSettings;
 static SoundStatus		so;
+#ifdef USE_ALSA
+static snd_pcm_t		*pcm = NULL;
+#endif
 
 static bool8	rewinding;
 
@@ -331,7 +337,11 @@ static void InitTimer (void);
 static void NSRTControllerSetup (void);
 static int make_snes9x_dirs (void);
 #ifndef NOSOUND
+#ifdef USE_ALSA
+static void S9xAlsaSamplesAvailable(void *data);
+#else
 static void * S9xProcessSound (void *);
+#endif
 #endif
 #ifdef JOYSTICK_SUPPORT
 static void InitJoysticks (void);
@@ -667,7 +677,11 @@ void S9xParsePortConfig (ConfigFile &conf, int pass)
 #endif
 	unixSettings.SoundBufferSize   = conf.GetUInt     ("Unix::SoundBufferSize",     100);
 	unixSettings.SoundFragmentSize = conf.GetUInt     ("Unix::SoundFragmentSize",   2048);
+#ifdef USE_ALSA
+	sound_device                   = conf.GetStringDup("Unix::SoundDevice",         "default");
+#else
 	sound_device                   = conf.GetStringDup("Unix::SoundDevice",         "/dev/dsp");
+#endif
 
 	keymaps.clear();
 	if (!conf.GetBool("Unix::ClearAllControls", false))
@@ -1236,12 +1250,12 @@ void S9xHandlePortCommand (s9xcommand_t cmd, int16 data1, int16 data2)
 					else
 						js_mod[cmd.port[2]] &= ~cmd.port[3];
 					break;
-				
+
 				case 1:
 					if (data1)
 						js_mod[cmd.port[2]] ^=  cmd.port[3];
 					break;
-				
+
 				case 2:
 					rewinding = (bool8) data1;
 					break;
@@ -1393,7 +1407,7 @@ static void ReadJoysticks (void)
 
 static void SoundTrigger (void)
 {
-#ifndef NOSOUND
+#if !defined(NOSOUND) && !defined(USE_ALSA)
 	S9xProcessSound(NULL);
 #endif
 }
@@ -1405,7 +1419,7 @@ static void InitTimer (void)
 #endif
 	struct sigaction	sa;
 
-#ifdef USE_THREADS
+#if defined(USE_THREADS) && !defined(USE_ALSA)
 	if (unixSettings.ThreadSound)
 	{
 		pthread_mutex_init(&mutex, NULL);
@@ -1435,11 +1449,90 @@ static void InitTimer (void)
 #endif
 }
 
-bool8 S9xOpenSoundDevice (void)
+#ifdef USE_ALSA
+bool8 S9xOpenAlsaDevice (void)
 {
-#ifndef NOSOUND
-	int	J, K;
+	int err;
+	snd_pcm_sw_params_t *sw_params;
+	snd_pcm_uframes_t alsa_buffer_size, alsa_period_size;
 
+	err = snd_pcm_open(&pcm, sound_device, SND_PCM_STREAM_PLAYBACK, SND_PCM_NONBLOCK);
+	if(err < 0)
+		goto fail;
+
+	err = snd_pcm_set_params(pcm, Settings.SixteenBitSound ? SND_PCM_FORMAT_S16 : SND_PCM_FORMAT_U8,
+								SND_PCM_ACCESS_RW_INTERLEAVED,
+								Settings.Stereo ? 2 : 1,
+								Settings.SoundPlaybackRate,
+								1,	// allow software resampling
+								unixSettings.SoundBufferSize * 1000);
+	if(err < 0)
+		goto close_fail;
+
+	snd_pcm_sw_params_alloca(&sw_params);
+	snd_pcm_sw_params_current(pcm, sw_params);
+	snd_pcm_get_params(pcm, &alsa_buffer_size, &alsa_period_size);
+	// Don't start until we're (nearly) full
+	snd_pcm_sw_params_set_start_threshold(pcm, sw_params, alsa_buffer_size);	// check?
+	// Transfer in blocks of period size
+	snd_pcm_sw_params_set_avail_min(pcm, sw_params, alsa_period_size);
+	err = snd_pcm_sw_params(pcm, sw_params);
+	if(err < 0)
+		goto close_fail;
+
+	S9xSetSamplesAvailableCallback(S9xAlsaSamplesAvailable, NULL);
+	return (TRUE);
+
+close_fail:
+	snd_pcm_drain(pcm);
+	snd_pcm_close(pcm);
+	pcm = NULL;
+
+fail:
+	printf("OpenAlsaDevice failed: %s\n", snd_strerror(err));
+
+	return (FALSE);
+}
+
+void S9xAlsaSamplesAvailable(void *data)
+{
+	snd_pcm_sframes_t frames_written, frames;
+	int bytes;
+
+	S9xFinalizeSamples();
+
+	frames = snd_pcm_avail_update(pcm);
+	if(frames < 0)
+		snd_pcm_recover(pcm, frames, 1);
+
+	frames = MIN(frames, S9xGetSampleCount() >> (Settings.Stereo ? 1 : 0));
+
+	bytes = snd_pcm_frames_to_bytes(pcm, frames);
+	if(bytes <= 0 || bytes > SOUND_BUFFER_SIZE)
+		return;
+
+	S9xMixSamples(Buf, frames << (Settings.Stereo ? 1 : 0));
+
+	frames_written = 0;
+	while(frames_written < frames)
+	{
+		int result;
+
+		result = snd_pcm_writei(pcm, Buf + snd_pcm_frames_to_bytes(pcm, frames_written), frames - frames_written);
+		if(result < 0)
+		{
+			result = snd_pcm_recover(pcm, result, 1);
+			if(result < 0)
+				break;
+		}
+		else
+			frames_written += result;
+	}
+}
+#else
+bool8 S9xOpenOssDevice (void)
+{
+	int	J, K;
 	so.sound_fd = open(sound_device, O_WRONLY | O_NONBLOCK);
 	if (so.sound_fd == -1)
 		return (FALSE);
@@ -1466,12 +1559,25 @@ bool8 S9xOpenSoundDevice (void)
 
 	so.fragment_size = J;
 	printf("fragment size: %d\n", J);
-#endif
 
 	return (TRUE);
 }
+#endif
 
+bool8 S9xOpenSoundDevice (void)
+{
 #ifndef NOSOUND
+#ifdef USE_ALSA
+	return S9xOpenAlsaDevice();
+#else
+	return S9xOpenOssDevice();
+#endif
+#else
+	return (TRUE);
+#endif
+}
+
+#if !defined(NOSOUND) && !defined(USE_ALSA)
 
 static void * S9xProcessSound (void *)
 {
@@ -1573,6 +1679,17 @@ void S9xExit (void)
 	S9xUnmapAllControls();
 	S9xDeinitDisplay();
 	Memory.Deinit();
+
+#ifdef USE_ALSA
+	S9xSetSamplesAvailableCallback(NULL, NULL);
+	if(pcm)
+	{
+		snd_pcm_drain(pcm);
+		snd_pcm_close(pcm);
+		pcm = NULL;
+	}
+#endif
+
 	S9xDeinitAPU();
 
 	exit(0);
@@ -1881,7 +1998,7 @@ int main (int argc, char **argv)
 				rewinding = stateMan.pop();
 			else if(IPPU.TotalEmulatedFrames % unixSettings.rewindGranularity == 0)
 				stateMan.push();
-			
+
 			S9xMainLoop();
 		}
 
