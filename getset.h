@@ -238,7 +238,23 @@ inline uint8 S9xGetByte (uint32 Address)
 
 	if (GetAddress >= (uint8 *) CMemory::MAP_LAST)
 	{
-		byte = *(GetAddress + (Address & 0xffff));
+		GetAddress += Address & 0xffff;
+
+	#ifdef DEBUGGER
+		if ((CPU.Flags & WATCH_FLAG) && !(CPU.Flags & SINGLE_STEP_FLAG))
+		{
+			for (int wp = 0; wp < 6; wp++) {
+				if (S9xWatchpoint[wp].Mode & WATCH_MODE_READ &&
+					S9xWatchpoint[wp].RealAddress == GetAddress)
+				{
+					CPU.Flags |= DEBUG_MODE_FLAG;
+					break;
+				}
+			}
+		}
+	#endif
+
+		byte = *GetAddress;
 		addCyclesInMemoryAccess;
 		return (byte);
 	}
@@ -366,7 +382,24 @@ inline uint16 S9xGetWord (uint32 Address, enum s9xwrap_t w = WRAP_NONE)
 
 	if (GetAddress >= (uint8 *) CMemory::MAP_LAST)
 	{
-		word = READ_WORD(GetAddress + (Address & 0xffff));
+		GetAddress += Address & 0xffff;
+
+	#ifdef DEBUGGER
+		if ((CPU.Flags & WATCH_FLAG) && !(CPU.Flags & SINGLE_STEP_FLAG))
+		{
+			for (int wp = 0; wp < 6; wp++) {
+				if (S9xWatchpoint[wp].Mode & WATCH_MODE_READ &&
+					(S9xWatchpoint[wp].RealAddress == GetAddress ||
+					 S9xWatchpoint[wp].RealAddress == GetAddress + 1))
+				{
+					CPU.Flags |= DEBUG_MODE_FLAG;
+					break;
+				}
+			}
+		}
+	#endif
+
+		word = READ_WORD(GetAddress);
 		addCyclesInMemoryAccess_x2;
 		return (word);
 	}
@@ -499,7 +532,23 @@ inline void S9xSetByte (uint8 Byte, uint32 Address)
 
 	if (SetAddress >= (uint8 *) CMemory::MAP_LAST)
 	{
-		*(SetAddress + (Address & 0xffff)) = Byte;
+		SetAddress += Address & 0xffff;
+
+	#ifdef DEBUGGER
+		if ((CPU.Flags & WATCH_FLAG) && !(CPU.Flags & SINGLE_STEP_FLAG))
+		{
+			for (int wp = 0; wp < 6; wp++) {
+				if (S9xWatchpoint[wp].Mode & WATCH_MODE_WRITE &&
+					S9xWatchpoint[wp].RealAddress == SetAddress)
+				{
+					CPU.Flags |= DEBUG_MODE_FLAG;
+					break;
+				}
+			}
+		}
+	#endif
+
+		*SetAddress = Byte;
 		addCyclesInMemoryAccess;
 		return;
 	}
@@ -639,7 +688,24 @@ inline void S9xSetWord (uint16 Word, uint32 Address, enum s9xwrap_t w = WRAP_NON
 
 	if (SetAddress >= (uint8 *) CMemory::MAP_LAST)
 	{
-		WRITE_WORD(SetAddress + (Address & 0xffff), Word);
+		SetAddress += Address & 0xffff;
+
+	#ifdef DEBUGGER
+		if ((CPU.Flags & WATCH_FLAG) && !(CPU.Flags & SINGLE_STEP_FLAG))
+		{
+			for (int wp = 0; wp < 6; wp++) {
+				if (S9xWatchpoint[wp].Mode & WATCH_MODE_WRITE &&
+					(S9xWatchpoint[wp].RealAddress == SetAddress ||
+					 S9xWatchpoint[wp].RealAddress == SetAddress + 1))
+				{
+					CPU.Flags |= DEBUG_MODE_FLAG;
+					break;
+				}
+			}
+		}
+	#endif
+
+		WRITE_WORD(SetAddress, Word);
 		addCyclesInMemoryAccess_x2;
 		return;
 	}

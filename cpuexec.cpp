@@ -232,21 +232,20 @@ void S9xMainLoop (void)
 		}
 
 	#ifdef DEBUGGER
-		if ((CPU.Flags & BREAK_FLAG) && !(CPU.Flags & SINGLE_STEP_FLAG))
-		{
-			for (int Break = 0; Break != 6; Break++)
+		if (!(CPU.Flags & CONTINUE_FLAG)) {
+			if ((CPU.Flags & BREAK_FLAG) && !(CPU.Flags & SINGLE_STEP_FLAG))
 			{
-				if (S9xBreakpoint[Break].Enabled &&
-					S9xBreakpoint[Break].Bank == Registers.PB &&
-					S9xBreakpoint[Break].Address == Registers.PCw)
-				{
-					if (S9xBreakpoint[Break].Enabled == 2)
-						S9xBreakpoint[Break].Enabled = TRUE;
-					else
+				for (int Break = 0; Break != 6; Break++) {
+					if (S9xBreakpoint[Break].Enabled &&
+						S9xBreakpoint[Break].Address == ((uint32) Registers.PCw | ((uint32) Registers.PB << 16))) {
 						CPU.Flags |= DEBUG_MODE_FLAG;
+						break;
+					}
 				}
 			}
 		}
+		else
+			CPU.Flags &= ~CONTINUE_FLAG;
 
 		if (CPU.Flags & DEBUG_MODE_FLAG)
 			break;

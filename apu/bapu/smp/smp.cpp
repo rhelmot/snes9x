@@ -6,7 +6,7 @@
 #define SMP_CPP
 namespace SNES {
 
-#if defined(DEBUGGER)
+#if defined(DEBUGGER) && 0
   #include "debugger/debugger.cpp"
   #include "debugger/disassembler.cpp"
   SMPDebugger smp;

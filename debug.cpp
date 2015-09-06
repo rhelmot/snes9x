@@ -193,6 +193,7 @@ extern FILE	*apu_trace;
 FILE		*trace = NULL, *trace2 = NULL;
 
 struct SBreakPoint	S9xBreakpoint[6];
+struct SWatchPoint	S9xWatchpoint[6];
 
 struct SDebug
 {
@@ -214,49 +215,25 @@ static struct SDebug	Debug = { { 0, 0 }, { 0, 0 } };
 static const char	*HelpMessage[] =
 {
 	"Command Help:",
-	"?, help                - Shows this command help",
-	"r                      - Shows the registers",
-	"i                      - Shows the interrupt vectors",
-	"t                      - Trace current instruction   [step-into]",
-	"p                      - Proceed to next instruction [step-over]",
-	"s                      - Skip to next instruction    [skip]",
-	"T                      - Toggle CPU instruction tracing to trace.log",
-	"TS                     - Toggle SA-1 instruction tracing to trace_sa1.log",
-	"E                      - Toggle HC-based event tracing to trace.log",
-	"V                      - Toggle non-DMA V-RAM read/write tracing to stdout",
-	"D                      - Toggle on-screen DMA tracing",
-	"H                      - Toggle on-screen HDMA tracing",
-	"U                      - Toggle on-screen unknown register read/write tracing",
-	"P                      - Toggle on-screen DSP tracing",
-	"S                      - Dump sprite (OBJ) status",
-	"g [Address]            - Go or go to [Address]",
-	"u [Address]            - Disassemble from PC or [Address]",
-	"d [Address]            - Dump from PC or [Address]",
-	"bv [Number]            - View breakpoints or view breakpoint [Number]",
-	"bs [Number] [Address]  - Enable/disable breakpoint",
-	"                         [enable example: bs #2 $02:8002]",
-	"                         [disable example: bs #2]",
-	"c                      - Dump SNES colour palette",
-	"W                      - Show what SNES hardware features the ROM is using",
-	"                         which might not be implemented yet",
-	"w                      - Show some SNES hardware features used so far in this frame",
-	"R                      - Reset SNES",
-	"q                      - Quit emulation",
-//	"ai                     - Shou APU vectors",
-//	"a                      - Show APU status",
-//	"x                      - Show Sound DSP status",
-//	"A                      - Toggle APU instruction tracing to aputrace.log",
-//	"B                      - Toggle sound DSP register tracing to aputrace.log",
-//	"C                      - Dump sound sample addresses",
-//	"ad [Address]           - Dump APU RAM from PC or [Address]",
-	"",
-	"[Address]              - $Bank:Address or $Address",
-	"                         [for example: $01:8123]",
-	"[Number]               - #Number",
-	"                         [for example: #1]",
-	"z                      - ",
-	"f                      - ",
-	"dump                   - ",
+	"?, help                   - Shows this command help",
+	"status                    - Shows the current status of the registers and current instruction",
+	"info [topic]              - Print out information about the given topic, run with no argument for topics",
+	"x[/format] $[addr]        - Display memory contents. GDB syntax.",
+	"dump [addr] [count]       - Dump memory to file",
+	"r, reset                  - Reset the emulated system",
+	"trace [what]              - Toggle tracing of some subsystem, run with no arguments for options",
+	"b, break $[addr]          - Add a breakpoint at [addr]",
+	"u, unbreak [n]            - Remove breakpoing #n",
+	"w, watch $[addr] [type]   - Add a watchpoint, breaking on {read, write, both} to/from [addr]",
+	"unwatch [n]               - Remove watchpoint #n",
+	"s, step                   - Step to the next emulated instruction",
+	"n, next                   - Step to the next emulated instruction, stepping over subroutine calls",
+	"c, continue               - Continue execution",
+
+	"z                         - ???? Dumps some sort of VRAM data, I don't know what this does",
+	"f                         - ???? Some sort of attempt to step some number of frames forward?",
+	"d                         - ???? What the actual heck does this do",
+	"u                         - ???? Disassemble (Unassemble) some bytes",
 	"",
 	NULL
 };
@@ -325,9 +302,8 @@ static uint16 S9xDebugSA1GetWord (uint32);
 static uint8 debug_cpu_op_print (char *, uint8, uint16);
 static uint8 debug_sa1_op_print (char *, uint8, uint16);
 static void debug_line_print (const char *);
-static int debug_get_number (char *, uint16 *);
-static short debug_get_start_address (char *, uint8 *, uint32 *);
-static void debug_process_command (char *);
+static short debug_get_start_address (const char *, uint8 *, uint32 *);
+static void debug_process_command (const char *);
 static void debug_print_window (uint8 *);
 static const char * debug_clip_fn (int);
 static void debug_whats_used (void);
@@ -1327,20 +1303,7 @@ static void debug_line_print (const char *Line)
 	printf("%s\n", Line);
 }
 
-static int debug_get_number (char *Line, uint16 *Number)
-{
-	int	i;
-
-	if (sscanf(Line, " #%d", &i) == 1)
-	{
-		*Number = i;
-		return (1);
-	}
-
-	return (-1);
-}
-
-static short debug_get_start_address (char *Line, uint8 *Bank, uint32 *Address)
+static short debug_get_start_address (const char *Line, uint8 *Bank, uint32 *Address)
 {
 	uint32	a, b;
 
@@ -1353,16 +1316,347 @@ static short debug_get_start_address (char *Line, uint8 *Bank, uint32 *Address)
 	return (1);
 }
 
-static void debug_process_command (char *Line)
+static void debug_print_vectors ()
+{
+	char string[512];
+	printf("Vectors:\n");
+	sprintf(string, "      8 Bit   16 Bit ");
+	debug_line_print(string);
+	sprintf(string, "ABT $00:%04X|$00:%04X", S9xDebugGetWord(0xFFF8), S9xDebugGetWord(0xFFE8));
+	debug_line_print(string);
+	sprintf(string, "BRK $00:%04X|$00:%04X", S9xDebugGetWord(0xFFFE), S9xDebugGetWord(0xFFE6));
+	debug_line_print(string);
+	sprintf(string, "COP $00:%04X|$00:%04X", S9xDebugGetWord(0xFFF4), S9xDebugGetWord(0xFFE4));
+	debug_line_print(string);
+	sprintf(string, "IRQ $00:%04X|$00:%04X", S9xDebugGetWord(0xFFFE), S9xDebugGetWord(0xFFEE));
+	debug_line_print(string);
+	sprintf(string, "NMI $00:%04X|$00:%04X", S9xDebugGetWord(0xFFFA), S9xDebugGetWord(0xFFEA));
+	debug_line_print(string);
+	sprintf(string, "RES     $00:%04X", S9xDebugGetWord(0xFFFC));
+	debug_line_print(string);
+}
+
+static void debug_print_colors (bool rgb_mode)
+{
+	if (rgb_mode) {
+		printf("Colors (RGB):\n    ");
+
+		for (int i = 0; i < 16; i++) {
+
+			printf("%2d      ", i);
+			if (i == 7) {
+				printf("\n    ");
+			}
+		}
+
+		for (int i = 0; i < 16; i++) {
+			printf("\n%2d  ", i);
+			for (int j = 0; j < 16; j++) {
+				printf("%02x%02x%02x  ", PPU.CGDATA[i*16 + j] & 0x1f, (PPU.CGDATA[i*16 + j] >> 5) & 0x1f, (PPU.CGDATA[i*16 + j] >> 10) & 0x1f);
+				if (j == 7) {
+					printf("\n    ");
+				}
+			}
+		}
+
+		printf("\n");
+	} else {
+		printf("Colors (SNES):\n    ");
+
+		for (int i = 0; i < 16; i++) {
+
+			printf("%2d    ", i);
+			if (i == 7) {
+				printf("\n    ");
+			}
+		}
+
+		for (int i = 0; i < 16; i++) {
+			printf("\n%2d  ", i);
+			for (int j = 0; j < 16; j++) {
+				printf("%04x  ", PPU.CGDATA[i*16 + j]);
+				if (j == 7) {
+					printf("\n    ");
+				}
+			}
+		}
+
+		printf("\n");
+	}
+}
+
+static void debug_print_sprites ()
+{
+	int	SmallWidth, LargeWidth, SmallHeight, LargeHeight;
+
+	switch ((Memory.FillRAM[0x2101] >> 5) & 7)
+	{
+		case 0:
+			SmallWidth = SmallHeight = 8;
+			LargeWidth = LargeHeight = 16;
+			break;
+
+		case 1:
+			SmallWidth = SmallHeight = 8;
+			LargeWidth = LargeHeight = 32;
+			break;
+
+		case 2:
+			SmallWidth = SmallHeight = 8;
+			LargeWidth = LargeHeight = 64;
+			break;
+
+		case 3:
+			SmallWidth = SmallHeight = 16;
+			LargeWidth = LargeHeight = 32;
+			break;
+
+		case 4:
+			SmallWidth = SmallHeight = 16;
+			LargeWidth = LargeHeight = 64;
+			break;
+
+		default:
+		case 5:
+			SmallWidth = SmallHeight = 32;
+			LargeWidth = LargeHeight = 64;
+			break;
+
+		case 6:
+			SmallWidth = 16;
+			SmallHeight = 32;
+			LargeWidth = 32;
+			LargeHeight = 64;
+			break;
+
+		case 7:
+			SmallWidth = 16;
+			SmallHeight = 32;
+			LargeWidth = LargeHeight = 32;
+			break;
+	}
+
+	printf("\
+Sprites: Small: %dx%d\n\
+         Large: %dx%d\n\
+         OAMAddr: 0x%04x\n\
+         OBJNameBase: 0x%04x\n\
+         OBJNameSelect: 0x%04x\n\
+         First: %d\n",
+		   SmallWidth,
+		   SmallHeight,
+		   LargeWidth,
+		   LargeHeight,
+		   PPU.OAMAddr,
+		   PPU.OBJNameBase,
+		   PPU.OBJNameSelect,
+		   PPU.FirstSprite);
+
+	printf("\nOAM:");
+	for (int i = 0; i < 128; i++)
+	{
+		if (i % 4 == 0)
+			printf("\n%2x  ", i);
+		else
+			printf("  |  ");
+		printf("X:%3d Y:%3d %c%c%d%c",
+			   PPU.OBJ[i].HPos,
+			   PPU.OBJ[i].VPos,
+			   PPU.OBJ[i].VFlip ? 'V' : 'v',
+			   PPU.OBJ[i].HFlip ? 'H' : 'h',
+			   PPU.OBJ[i].Priority,
+			   PPU.OBJ[i].Size ? 'S' : 's');
+
+	}
+	printf("\n");
+}
+
+static int get_breakpoint_for (uint32 addr) {
+	int empty = -1;
+	for (int i = 0; i < 5; i++) {
+		if (S9xBreakpoint[i].Address == addr && S9xBreakpoint[i].Enabled) {
+			return i;
+		} else if (empty == -1 && !S9xBreakpoint[i].Enabled) {
+			empty = i;
+		}
+	}
+	if (empty != -1) S9xBreakpoint[empty].Address = addr;
+	return empty;
+}
+
+static int get_watchpoint_for (uint32 addr) {
+	int empty = -1;
+	for (int i = 0; i < 6; i++) {
+		if (S9xWatchpoint[i].Address == addr && S9xWatchpoint[i].Mode != WATCH_MODE_NONE) {
+			return i;
+		} else if (empty == -1 && S9xWatchpoint[i].Mode == WATCH_MODE_NONE) {
+			empty = i;
+		}
+	}
+	if (empty != -1) {
+		S9xWatchpoint[empty].Address = addr;
+		S9xWatchpoint[empty].RealAddress = Memory.Map[(addr & 0xffffff) >> MEMMAP_SHIFT] + (addr & 0xffff);
+	}
+	return empty;
+}
+
+static void debug_print_breakpoints () {
+	printf("Active breakpoints:\n");
+	for (int i = 0; i < 5; i++) {
+		if (S9xBreakpoint[i].Enabled) {
+			printf("  %d: $%06x\n", i, S9xBreakpoint[i].Address);
+		}
+	}
+}
+
+static void debug_print_watchpoints () {
+	printf("Active watchpoints:\n");
+	for (int i = 0; i < 6; i++) {
+		if (S9xWatchpoint[i].Mode != WATCH_MODE_NONE) {
+			printf("  %d: $%06x (%s)\n", i, S9xWatchpoint[i].Address,
+					S9xWatchpoint[i].Mode == WATCH_MODE_READ ? "read" :
+					(S9xWatchpoint[i].Mode == WATCH_MODE_WRITE ? "write" : "both"));
+		}
+	}
+}
+
+static void debug_print_status () {
+	char	string[512];
+	debug_cpu_op_print(string, Registers.PB, Registers.PCw);
+	debug_line_print(string);
+}
+
+static void debug_process_command (const char *Line)
 {
 	uint8	Bank = Registers.PB;
 	uint32	Address = Registers.PCw;
-	uint16	Hold = 0;
-	uint16	Number;
-	short	ErrorCode;
 	char	string[512];
 
-	if (strncasecmp(Line, "dump", 4) == 0)
+	if (strncasecmp(Line, "status", 6) == 0)
+	{
+		debug_print_status();
+	}
+
+	else if (strncasecmp(Line, "info", 4) == 0)
+	{
+		if (strncasecmp(Line + 5, "vectors", 7) == 0)
+			debug_print_vectors();
+		else if (strncasecmp(Line + 5, "colors-rgb", 10) == 0 ||
+				strncasecmp(Line + 5, "colours-rgb", 11) == 0)
+			debug_print_colors(true);
+		else if (strncasecmp(Line + 5, "colors", 6) == 0 ||
+				strncasecmp(Line + 5, "colours", 6) == 0 ||
+				strncasecmp(Line + 5, "colors-snes", 11) == 0 ||
+				strncasecmp(Line + 5, "colours-snes", 12) == 0)
+			debug_print_colors(false);
+		else if (strncasecmp(Line + 5, "sprites", 7) == 0 ||
+				strncasecmp(Line + 5, "oam", 3) == 0)
+			debug_print_sprites();
+		else if (strncasecmp(Line + 5, "missing", 7) == 0)
+			debug_whats_missing();
+		else if (strncasecmp(Line + 5, "used", 4) == 0)
+			debug_whats_used();
+		else if (strncasecmp(Line + 5, "breakpoints", 11) == 0)
+			debug_print_breakpoints();
+		else if (strncasecmp(Line + 5, "watchpoints", 11) == 0)
+			debug_print_watchpoints();
+		else
+			printf("Usage: info [vectors | colors-snes | colors-rgb | sprites | missing | used | breakpoints | watchpoints]\n");
+	}
+
+	else if (Line[0] == 'x') { // eXamine memory
+		const char *p;
+		uint32 count = 0;
+		uint8 wordsize = 1;
+		uint8 format = 1;	// {Dec, Hex}
+		uint32 address = 0;
+		if (Line[1] == '/') {
+			// Parse count
+			for (p = &Line[2]; *p >= '0' && *p <= '9'; p++) {
+				count *= 10;
+				count += *p - '0';
+			}
+
+			// Parse wordsize
+			if (*p == 'b') {
+				wordsize = 1;
+				p++;
+			} else if (*p == 'c') {
+				wordsize = 1;
+				p++;
+			} else if (*p == 'w') {
+				wordsize = 2;
+				p++;
+			} else if (*p == 'h') {
+				wordsize = 2;
+				p++;
+			} else if (*p == 'p') {
+				wordsize = 3;
+				p++;
+			}
+
+			// Parse format
+			if (*p == 'd') {
+				format = 0;
+				p++;
+			} else if (*p == 'x') {
+				format = 1;
+				p++;
+			}
+		} else {
+			p = &Line[1];
+		}
+
+		if (count == 0)
+			count = 1;
+
+		// Parse address
+		if (p[0] != ' ' || p[1] != '$' || !((p[2] >= '0' && p[2] <= '9') || (p[2] >= 'A' && p[2] <= 'Z') || (p[2] >= 'a' && p[2] <= 'z'))) {
+			printf("Bad examine command.\nFormat: x/{count}{wordsize}{format} ${addr}\n");
+			return;
+		}
+		p += 2;
+
+		for (; *p != '\0'; p++) {
+			if (*p >= '0' && *p <= '9') {
+				address *= 16;
+				address += *p - '0';
+			} else if (*p >= 'A' && *p <= 'Z') {
+				address *= 16;
+				address += *p - 'A' + 10;
+			} else if (*p >= 'a' && *p <= 'z') {
+				address *= 16;
+				address += *p - 'a' + 10;
+			} else {
+				printf("Bad examine command.\nFormat: x/{count}{wordsize}{format} ${addr}\n");
+				return;
+			}
+		}
+
+		// Do it!
+		int perline = (wordsize == 1 ? 16 : (wordsize == 2 ? 8 : 4));
+		for (int i = 0; i < count; i++) {
+			if (i % perline == 0) {
+				printf("\n$%06x:  ", address);
+			}
+			uint32 value = 0;
+			for (int j = 0; j < wordsize; j++) {
+				value |= S9xDebugGetByte(address) << (j * 8);
+				address += 1;
+			}
+
+			printf(wordsize == 1 ? 
+				(format == 0 ? " %3d" : " %02x")
+					:
+				(wordsize == 2 ? 
+				(format == 0 ? " %5d" : " %04x")
+				    :
+				(format == 0 ? " %7d" : " %06x")), value);
+		}
+		printf("\n");
+	}
+
+	else if (strncasecmp(Line, "dump", 4) == 0)
 	{
 		int	Count;
 
@@ -1383,156 +1677,27 @@ static void debug_process_command (char *Line)
 		}
 		else
 			printf("Usage: dump start_address_in_hex count_in_decimal\n");
-
-		return;
 	}
 
-	if (*Line == 'i')
+	else if (*Line == 'R' || *Line == 'r')	// reset
 	{
-		printf("Vectors:\n");
-		sprintf(string, "      8 Bit   16 Bit ");
-		debug_line_print(string);
-		sprintf(string, "ABT $00:%04X|$00:%04X", S9xDebugGetWord(0xFFF8), S9xDebugGetWord(0xFFE8));
-		debug_line_print(string);
-		sprintf(string, "BRK $00:%04X|$00:%04X", S9xDebugGetWord(0xFFFE), S9xDebugGetWord(0xFFE6));
-		debug_line_print(string);
-		sprintf(string, "COP $00:%04X|$00:%04X", S9xDebugGetWord(0xFFF4), S9xDebugGetWord(0xFFE4));
-		debug_line_print(string);
-		sprintf(string, "IRQ $00:%04X|$00:%04X", S9xDebugGetWord(0xFFFE), S9xDebugGetWord(0xFFEE));
-		debug_line_print(string);
-		sprintf(string, "NMI $00:%04X|$00:%04X", S9xDebugGetWord(0xFFFA), S9xDebugGetWord(0xFFEA));
-		debug_line_print(string);
-		sprintf(string, "RES     $00:%04X", S9xDebugGetWord(0xFFFC));
-		debug_line_print(string);
-	}
-
-/*
-	if (strncmp(Line, "ai", 2) == 0)
-	{
-		printf("APU vectors:");
-
-		for (int i = 0; i < 0x40; i += 2)
-		{
-			if (i % 16 == 0)
-				printf("\n%04x ", 0xffc0 + i);
-
-			printf("%04x ", APU.ExtraRAM[i]);
-		}
-
-		printf("\n");
-	}
-*/
-
-	if (*Line == 's')
-	{
-		Registers.PCw += debug_cpu_op_print(string, Bank, Address);
-		Bank = Registers.PB;
-		Address = Registers.PCw;
-		*Line = 'r';
-	}
-
-	if (*Line == 'z')
-	{
-		uint16	*p = (uint16 *) &Memory.VRAM[PPU.BG[2].SCBase << 1];
-
-		for (int l = 0; l < 32; l++)
-		{
-			for (int c = 0; c < 32; c++, p++)
-				printf("%04x,", *p++);
-
-			printf("\n");
+		printf("Are you sure you want to reset the emulator? [y/n] ");
+		const char * p = fgets(string, sizeof(string) - 1, stdin);
+		if (p[0] == 'y' || p[0] == 'Y') {
+			S9xReset();
+			printf("SNES reset.\n");
+			CPU.Flags |= DEBUG_MODE_FLAG;
 		}
 	}
 
-	if (*Line == 'c')
+	else if (strncasecmp(Line, "trace", 5) == 0)
 	{
-		printf("Colours:\n");
-
-		for (int i = 0; i < 256; i++)
-			printf("%02x%02x%02x  ", PPU.CGDATA[i] & 0x1f, (PPU.CGDATA[i] >> 5) & 0x1f, (PPU.CGDATA[i] >> 10) & 0x1f);
-
-		printf("\n");
-	}
-
-	if (*Line == 'S')
-	{
-		int	SmallWidth, LargeWidth, SmallHeight, LargeHeight;
-
-		switch ((Memory.FillRAM[0x2101] >> 5) & 7)
-		{
-
-			case 0:
-				SmallWidth = SmallHeight = 8;
-				LargeWidth = LargeHeight = 16;
-				break;
-
-			case 1:
-				SmallWidth = SmallHeight = 8;
-				LargeWidth = LargeHeight = 32;
-				break;
-
-			case 2:
-				SmallWidth = SmallHeight = 8;
-				LargeWidth = LargeHeight = 64;
-				break;
-
-			case 3:
-				SmallWidth = SmallHeight = 16;
-				LargeWidth = LargeHeight = 32;
-				break;
-
-			case 4:
-				SmallWidth = SmallHeight = 16;
-				LargeWidth = LargeHeight = 64;
-				break;
-
-			default:
-			case 5:
-				SmallWidth = SmallHeight = 32;
-				LargeWidth = LargeHeight = 64;
-				break;
-
-			case 6:
-				SmallWidth = 16;
-				SmallHeight = 32;
-				LargeWidth = 32;
-				LargeHeight = 64;
-				break;
-
-			case 7:
-				SmallWidth = 16;
-				SmallHeight = 32;
-				LargeWidth = LargeHeight = 32;
-				break;
-		}
-
-		printf("Sprites: Small: %dx%d, Large: %dx%d, OAMAddr: 0x%04x, OBJNameBase: 0x%04x, OBJNameSelect: 0x%04x, First: %d\n",
-		       SmallWidth, SmallHeight, LargeWidth, LargeHeight, PPU.OAMAddr, PPU.OBJNameBase, PPU.OBJNameSelect, PPU.FirstSprite);
-
-		for (int i = 0; i < 128; i++)
-		{
-			printf("X:%3d Y:%3d %c%c%d%c ",
-			       PPU.OBJ[i].HPos,
-			       PPU.OBJ[i].VPos,
-			       PPU.OBJ[i].VFlip ? 'V' : 'v',
-			       PPU.OBJ[i].HFlip ? 'H' : 'h',
-			       PPU.OBJ[i].Priority,
-			       PPU.OBJ[i].Size ? 'S' : 's');
-
-			if (i % 4 == 3)
-				printf("\n");
-		}
-	}
-
-	if (*Line == 'T')
-	{
-		if (Line[1] == 'S')
-		{
+		if (strncasecmp(Line + 6, "sa1", 3) == 0) {
 			SA1.Flags ^= TRACE_FLAG;
 
 			if (SA1.Flags & TRACE_FLAG)
 			{
-				printf("SA1 CPU instruction tracing enabled.\n");
+				printf("Tracing SA1 instructions to trace_sa1.log.\n");
 				ENSURE_TRACE_OPEN(trace2, "trace_sa1.log", "wb")
 			}
 			else
@@ -1542,13 +1707,12 @@ static void debug_process_command (char *Line)
 				trace2 = NULL;
 			}
 		}
-		else
-		{
+		else if (strncasecmp(Line + 6, "cpu", 3) == 0) {
 			CPU.Flags ^= TRACE_FLAG;
 
 			if (CPU.Flags & TRACE_FLAG)
 			{
-				printf("CPU instruction tracing enabled.\n");
+				printf("Tracing SNES CPU instructions to trace.log.\n");
 				ENSURE_TRACE_OPEN(trace, "trace.log", "wb")
 			}
 			else
@@ -1558,188 +1722,148 @@ static void debug_process_command (char *Line)
 				trace = NULL;
 			}
 		}
-	}
-
-	if (*Line == 'E')
-	{
-		Settings.TraceHCEvent = !Settings.TraceHCEvent;
-		printf("HC event tracing %s.\n", Settings.TraceHCEvent ? "enabled" : "disabled");
-	}
-
-	if (*Line == 'A')
-		spc_core->debug_toggle_trace();
-
-/*
-	if (*Line == 'B')
-	{
-		Settings.TraceSoundDSP = !Settings.TraceSoundDSP;
-		printf("Sound DSP register tracing %s.\n", Settings.TraceSoundDSP ? "enabled" : "disabled");
-	}
-
-	if (*Line == 'x')
-		S9xPrintSoundDSPState();
-
-	if (*Line == 'C')
-	{
-		printf("SPC700 sample addresses at 0x%04x:\n", APU.DSP[APU_DIR] << 8);
-
-		for (int i = 0; i < 256; i++)
-		{
-			uint8	*dir = IAPU.RAM + (((APU.DSP[APU_DIR] << 8) + i * 4) & 0xffff);
-			int		addr = *dir + (*(dir + 1) << 8);
-			int		addr2 = *(dir + 2) + (*(dir + 3) << 8);
-			printf("%04X %04X;", addr, addr2);
-
-			if (i % 8 == 7)
-				printf("\n");
+		else if (strncasecmp(Line + 6, "hcevent", 7) == 0) {
+			Settings.TraceHCEvent = !Settings.TraceHCEvent;
+			printf("HC event tracing %s.\n", Settings.TraceHCEvent ? "enabled" : "disabled");
+		}
+		else if (strncasecmp(Line + 6, "dma", 3) == 0) {
+			Settings.TraceDMA = !Settings.TraceDMA;
+			printf("DMA tracing %s.\n", Settings.TraceDMA ? "enabled" : "disabled");
+		}
+		else if (strncasecmp(Line + 6, "vram", 4) == 0) {
+			Settings.TraceVRAM = !Settings.TraceVRAM;
+			printf("Non-DMA VRAM write tracing %s.\n", Settings.TraceVRAM ? "enabled" : "disabled");
+		}
+		else if (strncasecmp(Line + 6, "hdma", 4) == 0) {
+			Settings.TraceHDMA = !Settings.TraceHDMA;
+			printf("HDMA tracing %s.\n", Settings.TraceHDMA ? "enabled" : "disabled");
+		}
+		else if (strncasecmp(Line + 6, "unknowns", 8) == 0) {
+			Settings.TraceUnknownRegisters = !Settings.TraceUnknownRegisters;
+			printf("Unknown registers read/write tracing %s.\n", Settings.TraceUnknownRegisters ? "enabled" : "disabled");
+		}
+		else {
+			printf("Usage: trace [cpu | sa1 | hcevent | dma | vram | hdma | unknowns]\n");
 		}
 	}
-*/
 
-	if (*Line == 'R')
-	{
-		S9xReset();
-		printf("SNES reset.\n");
-		CPU.Flags |= DEBUG_MODE_FLAG;
-	}
+	else if (*Line == 'z') { // ???
+		uint16	*p = (uint16 *) &Memory.VRAM[PPU.BG[2].SCBase << 1];
 
-/*
-	if (strncmp(Line, "ad", 2) == 0)
-	{
-		uint32	Count = 16;
-		Address = 0;
-
-		if (sscanf(Line + 2, "%x,%x", &Address, &Count) != 2)
+		for (int l = 0; l < 32; l++)
 		{
-			if (sscanf(Line + 2, "%x", &Address) == 1)
-				Count = 16;
+			for (int c = 0; c < 32; c++, p++)
+				printf("%04x,", *p++);
 		}
-
-		printf("APU RAM dump:\n");
-
-		for (uint32 l = 0; l < Count; l += 16)
-		{
-			printf("%04X ", Address);
-
-			for (int i = 0; i < 16; i++)
-				printf("%02X ", IAPU.RAM[Address++]);
-
-			printf("\n");
-		}
-
-		*Line = 0;
 	}
 
-	if (*Line == 'a')
-	{
-		printf("APU in-ports : %02X %02X %02X %02X\n", IAPU.RAM[0xF4], IAPU.RAM[0xF5], IAPU.RAM[0xF6], IAPU.RAM[0xF7]);
-		printf("APU out-ports: %02X %02X %02X %02X\n", APU.OutPorts[0], APU.OutPorts[1], APU.OutPorts[2], APU.OutPorts[3]);
-		printf("ROM/RAM switch: %s\n", (IAPU.RAM[0xf1] & 0x80) ? "ROM" : "RAM");
-
-		for (int i = 0; i < 3; i++)
-			if (APU.TimerEnabled[i])
-				printf("Timer%d enabled, Value: 0x%03X, 4-bit: 0x%02X, Target: 0x%03X\n",
-				       i, APU.Timer[i], IAPU.RAM[0xfd + i], APU.TimerTarget[i]);
-	}
-
-	if (*Line == 'P')
-	{
-		Settings.TraceDSP = !Settings.TraceDSP;
-		printf("DSP tracing %s.\n", Settings.TraceDSP ? "enabled" : "disabled");
-	}
-*/
-
-	if (*Line == 'p')
-	{
-		S9xBreakpoint[5].Enabled = FALSE;
-		Address += debug_cpu_op_print(string, Bank, Address);
-
-		if (strncmp(&string[18], "JMP", 3) != 0 &&
-		    strncmp(&string[18], "JML", 3) != 0 &&
-		    strncmp(&string[18], "RT" , 2) != 0 &&
-		    strncmp(&string[18], "BRA", 3))
-		{
+	else if (*Line == 'n' || *Line == 'N') {	// Next
+		uint8 nextOp = S9xDebugGetByte((uint32) Address | ((uint32) Bank << 16));
+		if (nextOp == 0x20 || nextOp == 0x22) {	// JSR or JSL
 			S9xBreakpoint[5].Enabled = TRUE;
-			S9xBreakpoint[5].Bank = Bank;
-			S9xBreakpoint[5].Address = Address;
-		}
-		else
-		{
+			S9xBreakpoint[5].Address = (uint32) Address + ((uint32) Bank << 16) + (nextOp == 0x20 ? 3 : 4);
+			CPU.Flags |= BREAK_FLAG;
+			CPU.Flags |= CONTINUE_FLAG;
+		} else {
 			CPU.Flags |= SINGLE_STEP_FLAG;
-			CPU.Flags &= ~DEBUG_MODE_FLAG;
 		}
+
+		CPU.Flags &= ~DEBUG_MODE_FLAG;
 	}
 
-	if (*Line == 'b')
-	{
-		if (Line[1] == 's')
-		{
-			debug_get_number(Line + 2, &Hold);
-
-			if (Hold > 4)
-				Hold = 0;
-
-			if (Hold < 5)
-			{
-				if (debug_get_start_address(Line + 5, &Bank, &Address) == -1)
-					S9xBreakpoint[Hold].Enabled = FALSE;
-				else
-				{
-					S9xBreakpoint[Hold].Enabled = TRUE;
-					S9xBreakpoint[Hold].Bank = Bank;
-					S9xBreakpoint[Hold].Address = Address;
-					CPU.Flags |= BREAK_FLAG;
-				}
-			}
-
-			Line[1] = 'v';
+	else if (*Line == 'b' || *Line == 'B') { // Break
+		uint32 addr;
+		if (sscanf(Line, "%*s $%x", &addr) != 1) {
+			printf("Usage: break ${addr}\n");
+			return;
 		}
-
-		if (Line[1] == 'v')
-		{
-			Number = 0;
-
-			if (debug_get_number(Line + 2, &Number) == -1 && Number < 5)
-			{
-				debug_line_print("Breakpoints:");
-
-				for (Number = 0; Number != 5; Number++)
-				{
-					if (S9xBreakpoint[Number].Enabled)
-						sprintf(string, "%i @ $%02X:%04X", Number, S9xBreakpoint[Number].Bank, S9xBreakpoint[Number].Address);
-					else
-						sprintf(string, "%i @ Disabled", Number);
-
-					debug_line_print(string);
-				}
-			}
-			else
-			{
-				debug_line_print("Breakpoint:");
-
-				if (S9xBreakpoint[Number].Enabled)
-					sprintf(string, "%i @ $%02X:%04X", Number, S9xBreakpoint[Number].Bank, S9xBreakpoint[Number].Address);
-				else
-					sprintf(string, "%i @ Disabled", Number);
-
-				debug_line_print(string);
-			}
+		if (addr > 0xFFFFFF) {
+			printf("Invalid address\n");
+			return;
 		}
+		int i = get_breakpoint_for(addr);
+		if (i == -1) {
+			printf("Too many breakpoints!\n");
+			return;
+		}
+		S9xBreakpoint[i].Enabled = TRUE;
+		CPU.Flags |= BREAK_FLAG;
 	}
 
-	if (*Line == '?' || strcasecmp(Line, "help") == 0)
+	else if (*Line == 'w' || *Line == 'W') { //Watch
+		uint32 addr;
+		uint8 type;
+		if (sscanf(Line, "%*s $%x %s", &addr, string) != 2) {
+			printf("Usage: watch ${addr} {read,write,both}\n");
+			return;
+		}
+		if (addr > 0xFFFFFF) {
+			printf("Invalid address\n");
+			return;
+		}
+		if (string[0] == 'r' || string[0] == 'R')
+			type = WATCH_MODE_READ;
+		else if (string[0] == 'w' || string[0] == 'W')
+			type = WATCH_MODE_BOTH;
+		else if (string[0] == 'b' || string[0] == 'B')
+			type = WATCH_MODE_BOTH;
+		else {
+			printf("Usage: watch ${addr} {read,write,both}\n");
+			return;
+		}
+
+		int i = get_watchpoint_for(addr);
+		if (i == -1) {
+			printf("Too many watchpoints!\n");
+			return;
+		}
+		S9xWatchpoint[i].Mode = type;
+		CPU.Flags |= WATCH_FLAG;
+	}
+
+	else if (strncasecmp(Line, "unwatch", 7) == 0) {
+		int i;
+		if (sscanf(Line, "%*s %d", &i) != 1) {
+			printf("Usage: unwatch {watchpoint num}\n");
+			return;
+		}
+		if (i < 0 || i > 5) {
+			printf("Bad watchpoint number\n");
+			return;
+		}
+
+		S9xWatchpoint[i].Mode = WATCH_MODE_NONE;
+		printf("Removed watchpoint %d\n", i);
+	}
+
+	else if (*Line == 'u' || *Line == 'U') { // unbreak
+		int i;
+		if (sscanf(Line, "%*s %d", &i) != 1) {
+			printf("Usage: unbreak {breakpoint num}\n");
+			return;
+		}
+		if (i < 0 || i > 4) {
+			printf("Bad breakpoint number\n");
+			return;
+		}
+
+		S9xBreakpoint[i].Enabled = FALSE;
+		printf("Removed breakpoint %d\n", i);
+	}
+
+	else if (*Line == '?' || strncasecmp(Line, "help", 4) == 0)
 	{
 		for (int i = 0; HelpMessage[i] != NULL; i++)
 			debug_line_print(HelpMessage[i]);
 	}
 
-	if (*Line == 't')
+	else if (*Line == 's' || *Line == 'S')
 	{
 		CPU.Flags |= SINGLE_STEP_FLAG;
 		CPU.Flags &= ~DEBUG_MODE_FLAG;
 	}
 
-	if (*Line == 'f')
+	else if (*Line == 'f' || *Line == 'F')
 	{
 		CPU.Flags |= FRAME_ADVANCE_FLAG;
 		CPU.Flags &= ~DEBUG_MODE_FLAG;
@@ -1751,67 +1875,12 @@ static void debug_process_command (char *Line)
 			ICPU.Frame = 0;
 	}
 
-	if (*Line == 'g')
-	{
-		S9xBreakpoint[5].Enabled = FALSE;
-
-		bool8	found = FALSE;
-
-		for (int i = 0; i < 5; i++)
-		{
-			if (S9xBreakpoint[i].Enabled)
-			{
-				found = TRUE;
-
-				if (S9xBreakpoint[i].Bank == Registers.PB && S9xBreakpoint[i].Address == Registers.PCw)
-				{
-					S9xBreakpoint[i].Enabled = 2;
-					break;
-				}
-			}
-		}
-
-		if (!found)
-			CPU.Flags &= ~BREAK_FLAG;
-
-		ErrorCode = debug_get_start_address(Line, &Bank, &Address);
-
-		if (ErrorCode == 1)
-		{
-			S9xBreakpoint[5].Enabled = TRUE;
-			S9xBreakpoint[5].Bank = Bank;
-			S9xBreakpoint[5].Address = Address;
-			CPU.Flags |= BREAK_FLAG;
-		}
-
+	else if (*Line == 'c' || *Line == 'C') {
+		CPU.Flags |= CONTINUE_FLAG;
 		CPU.Flags &= ~DEBUG_MODE_FLAG;
 	}
 
-	if (*Line == 'D')
-	{
-		Settings.TraceDMA = !Settings.TraceDMA;
-		printf("DMA tracing %s.\n", Settings.TraceDMA ? "enabled" : "disabled");
-	}
-
-	if (*Line == 'V')
-	{
-		Settings.TraceVRAM = !Settings.TraceVRAM;
-		printf("Non-DMA VRAM write tracing %s.\n", Settings.TraceVRAM ? "enabled" : "disabled");
-	}
-
-	if (*Line == 'H')
-	{
-		Settings.TraceHDMA = !Settings.TraceHDMA;
-		printf("HDMA tracing %s.\n", Settings.TraceHDMA ? "enabled" : "disabled");
-	}
-
-	if (*Line == 'U')
-	{
-		Settings.TraceUnknownRegisters = !Settings.TraceUnknownRegisters;
-		printf("Unknown registers read/write tracing %s.\n", Settings.TraceUnknownRegisters ? "enabled" : "disabled");
-	}
-
-	if (*Line == 'd')
+	else if (*Line == 'd')
 	{
 		int		CLine;
 		int		CByte;
@@ -1823,7 +1892,7 @@ static void debug_process_command (char *Line)
 			Address = Debug.Dump.Address;
 		}
 
-		ErrorCode = debug_get_start_address(Line, &Bank, &Address);
+		debug_get_start_address(Line, &Bank, &Address);
 
 		for (CLine = 0; CLine != 10; CLine++)
 		{
@@ -1871,22 +1940,8 @@ static void debug_process_command (char *Line)
 		Debug.Dump.Address = Address;
 	}
 
-	if (*Line == 'q')
-		S9xExit();
 
-	if (*Line == 'W')
-		debug_whats_missing();
-
-	if (*Line == 'w')
-		debug_whats_used();
-
-	if (*Line == 'r')
-	{
-		debug_cpu_op_print(string, Bank, Address);
-		debug_line_print(string);
-	}
-
-	if (*Line == 'u')
+	else if (*Line == 'u')
 	{
 		if (Debug.Unassemble.Bank != 0 || Debug.Unassemble.Address != 0)
 		{
@@ -1894,7 +1949,7 @@ static void debug_process_command (char *Line)
 			Address = Debug.Unassemble.Address;
 		}
 
-		ErrorCode = debug_get_start_address(Line, &Bank, &Address);
+		debug_get_start_address(Line, &Bank, &Address);
 
 		for (int i = 0; i != 10; i++)
 		{
@@ -1906,7 +1961,9 @@ static void debug_process_command (char *Line)
 		Debug.Unassemble.Address = Address;
 	}
 
-	debug_line_print("");
+	else {
+		printf("Invalid command.\n");
+	}
 
 	return;
 }
@@ -2528,17 +2585,18 @@ static void debug_whats_missing (void)
 
 void S9xDoDebug (void)
 {
-	char	Line[513];
+	static char	Line[513] = {'\0'};
+	char		Line_in[513];
 
 	Debug.Dump.Bank = 0;
 	Debug.Dump.Address = 0;
 	Debug.Unassemble.Bank = 0;
 	Debug.Unassemble.Address = 0;
+	S9xBreakpoint[5].Enabled = FALSE;
 
 	S9xTextMode();
 
-	strcpy(Line, "r");
-	debug_process_command(Line);
+	debug_process_command("status");
 
 	while (CPU.Flags & DEBUG_MODE_FLAG)
 	{
@@ -2548,8 +2606,20 @@ void S9xDoDebug (void)
 		printf("> ");
 		fflush(stdout);
 
-		p = fgets(Line, sizeof(Line) - 1, stdin);
-		Line[strlen(Line) - 1] = 0;
+		p = fgets(Line_in, sizeof(Line_in) - 1, stdin);
+		if (p == NULL || Line_in[0] == '\0') {
+			printf("\nAre you sure you want to quit? [y/n] ");
+			p = fgets(Line_in, sizeof(Line_in) - 1, stdin);
+			if (p == NULL || Line_in[0] == '\0' || Line_in[0] == '\n' || Line_in[0] == 'Y' || Line_in[0] == 'y') {
+				if (p == NULL || Line_in[0] == '\0') printf("\n");
+				S9xExit();
+			}
+			continue;
+		} else if (Line_in[0] != '\n') {
+			Line_in[strlen(Line_in) - 1] = 0;
+			memset(Line, '\0', sizeof(Line));
+			strcpy(Line, Line_in);
+		}
 
 		Cycles = CPU.Cycles;
 		debug_process_command(Line);

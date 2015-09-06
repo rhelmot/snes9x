@@ -186,8 +186,14 @@
 struct SBreakPoint
 {
 	bool8	Enabled;
-	uint8	Bank;
-	uint16	Address;
+	uint32	Address;
+};
+
+struct SWatchPoint
+{
+	uint8	Mode;
+	uint32	Address;
+	uint8 *	RealAddress;
 };
 
 #define ENSURE_TRACE_OPEN(fp, file, mode) \
@@ -198,7 +204,13 @@ struct SBreakPoint
 		fp = fopen(fn.c_str(), mode); \
 	}
 
+#define WATCH_MODE_NONE  0
+#define WATCH_MODE_READ  1
+#define WATCH_MODE_WRITE 2
+#define WATCH_MODE_BOTH  3
+
 extern struct SBreakPoint	S9xBreakpoint[6];
+extern struct SWatchPoint	S9xWatchpoint[6];
 
 void S9xDoDebug (void);
 void S9xTrace (void);

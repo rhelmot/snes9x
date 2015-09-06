@@ -1759,7 +1759,11 @@ int main (int argc, char **argv)
 
 	rewinding = false;
 
+#ifdef DEBUGGER
+	CPU.Flags = DEBUG_MODE_FLAG;
+#else
 	CPU.Flags = 0;
+#endif
 
 	S9xLoadConfigFiles(argv, argc);
 	rom_filename = S9xParseArgs(argv, argc);

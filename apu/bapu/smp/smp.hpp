@@ -124,7 +124,7 @@ public:
   inline uint8  op_ror (uint8  x);
 };
 
-#if defined(DEBUGGER)
+#if defined(DEBUGGER) && 0
   #include "debugger/debugger.hpp"
   extern SMPDebugger smp;
 #else

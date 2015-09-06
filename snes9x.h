@@ -276,6 +276,8 @@
 #define SINGLE_STEP_FLAG	(1 <<  2)	// debugger
 #define BREAK_FLAG			(1 <<  3)	// debugger
 #define SCAN_KEYS_FLAG		(1 <<  4)	// CPU
+#define WATCH_FLAG			(1 <<  5)	// debugger
+#define CONTINUE_FLAG		(1 <<  6)	// debugger
 #define HALTED_FLAG			(1 << 12)	// APU
 #define FRAME_ADVANCE_FLAG	(1 <<  9)
 
