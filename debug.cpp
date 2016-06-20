@@ -178,7 +178,15 @@
 
 #ifdef DEBUGGER
 
+#ifdef __WIN32__
+#include <WinSock2.h>
+#else
+#include <sys/select.h>
+#endif
+
 #include <stdarg.h>
+#include <iomanip>
+#include <iostream>
 #include "snes9x.h"
 #include "memmap.h"
 #include "cpuops.h"
@@ -188,29 +196,12 @@
 #include "debug.h"
 #include "missing.h"
 
+using std::endl;
+
 extern SDMA	DMA[8];
 extern FILE	*apu_trace;
 FILE		*trace = NULL, *trace2 = NULL;
 
-struct SBreakPoint	S9xBreakpoint[6];
-struct SWatchPoint	S9xWatchpoint[6];
-
-struct SDebug
-{
-	struct
-	{
-		uint8	Bank;
-		uint16	Address;
-	}	Dump;
-
-	struct
-	{
-		uint8	Bank;
-		uint16	Address;
-	}	Unassemble;
-};
-
-static struct SDebug	Debug = { { 0, 0 }, { 0, 0 } };
 
 static const char	*HelpMessage[] =
 {
@@ -301,16 +292,15 @@ static uint8 S9xDebugSA1GetByte (uint32);
 static uint16 S9xDebugSA1GetWord (uint32);
 static uint8 debug_cpu_op_print (char *, uint8, uint16);
 static uint8 debug_sa1_op_print (char *, uint8, uint16);
-static void debug_line_print (const char *);
+static void debug_line_print (const char *, std::ostream &out);
 static short debug_get_start_address (const char *, uint8 *, uint32 *);
-static void debug_process_command (const char *);
-static void debug_print_window (uint8 *);
+static void debug_print_window (std:: ostream &, uint8 *);
 static const char * debug_clip_fn (int);
 static void debug_whats_used (void);
 static void debug_whats_missing (void);
 
 
-static uint8 S9xDebugGetByte (uint32 Address)
+uint8 S9xDebugGetByte (uint32 Address)
 {
 	int		block = (Address & 0xffffff) >> MEMMAP_SHIFT;
 	uint8	*GetAddress = Memory.Map[block];
@@ -347,7 +337,7 @@ static uint8 S9xDebugGetByte (uint32 Address)
 	}
 }
 
-static uint16 S9xDebugGetWord (uint32 Address)
+uint16 S9xDebugGetWord (uint32 Address)
 {
 	uint16	word;
 
@@ -357,7 +347,7 @@ static uint16 S9xDebugGetWord (uint32 Address)
 	return (word);
 }
 
-static uint8 S9xDebugSA1GetByte (uint32 Address)
+uint8 S9xDebugSA1GetByte (uint32 Address)
 {
 	int		block = (Address & 0xffffff) >> MEMMAP_SHIFT;
 	uint8	*GetAddress = SA1.Map[block];
@@ -401,7 +391,7 @@ static uint8 S9xDebugSA1GetByte (uint32 Address)
 	}
 }
 
-static uint16 S9xDebugSA1GetWord (uint32 Address)
+uint16 S9xDebugSA1GetWord (uint32 Address)
 {
 	uint16	word;
 
@@ -1298,9 +1288,42 @@ static uint8 debug_sa1_op_print (char *Line, uint8 Bank, uint16 Address)
 	return (Size);
 }
 
-static void debug_line_print (const char *Line)
+static void debug_print_window(std::ostream &out, uint8 *window)
 {
-	printf("%s\n", Line);
+	bool first = true;
+	for (int i = 0; i < 6; i++)
+	{
+		if (window[i])
+		{
+			if (first)
+				first = false;
+			else
+				out << ", ";
+
+			switch (i) {
+			case 0:
+			case 1:
+			case 2:
+			case 3:
+				out << "Background " << i;
+				break;
+
+			case 4:
+				out << "Objects";
+				break;
+
+			case 5:
+				out << "Color window";
+				break;
+			}
+		}
+	}
+	out << '\n';
+}
+
+static void debug_line_print (const char *Line, std::ostream &out)
+{
+	out << Line << '\n';
 }
 
 static short debug_get_start_address (const char *Line, uint8 *Bank, uint32 *Address)
@@ -1316,77 +1339,739 @@ static short debug_get_start_address (const char *Line, uint8 *Bank, uint32 *Add
 	return (1);
 }
 
-static void debug_print_vectors ()
+static const char * debug_clip_fn(int logic)
 {
-	char string[512];
-	printf("Vectors:\n");
-	sprintf(string, "      8 Bit   16 Bit ");
-	debug_line_print(string);
-	sprintf(string, "ABT $00:%04X|$00:%04X", S9xDebugGetWord(0xFFF8), S9xDebugGetWord(0xFFE8));
-	debug_line_print(string);
-	sprintf(string, "BRK $00:%04X|$00:%04X", S9xDebugGetWord(0xFFFE), S9xDebugGetWord(0xFFE6));
-	debug_line_print(string);
-	sprintf(string, "COP $00:%04X|$00:%04X", S9xDebugGetWord(0xFFF4), S9xDebugGetWord(0xFFE4));
-	debug_line_print(string);
-	sprintf(string, "IRQ $00:%04X|$00:%04X", S9xDebugGetWord(0xFFFE), S9xDebugGetWord(0xFFEE));
-	debug_line_print(string);
-	sprintf(string, "NMI $00:%04X|$00:%04X", S9xDebugGetWord(0xFFFA), S9xDebugGetWord(0xFFEA));
-	debug_line_print(string);
-	sprintf(string, "RES     $00:%04X", S9xDebugGetWord(0xFFFC));
-	debug_line_print(string);
-}
+	switch (logic)
+	{
+	case CLIP_OR:
+		return ("OR");
 
-static void debug_print_colors (bool rgb_mode)
-{
-	if (rgb_mode) {
-		printf("Colors (RGB):\n    ");
+	case CLIP_AND:
+		return ("AND");
 
-		for (int i = 0; i < 16; i++) {
+	case CLIP_XOR:
+		return ("XOR");
 
-			printf("%2d      ", i);
-			if (i == 7) {
-				printf("\n    ");
-			}
-		}
+	case CLIP_XNOR:
+		return ("XNOR");
 
-		for (int i = 0; i < 16; i++) {
-			printf("\n%2d  ", i);
-			for (int j = 0; j < 16; j++) {
-				printf("%02x%02x%02x  ", PPU.CGDATA[i*16 + j] & 0x1f, (PPU.CGDATA[i*16 + j] >> 5) & 0x1f, (PPU.CGDATA[i*16 + j] >> 10) & 0x1f);
-				if (j == 7) {
-					printf("\n    ");
-				}
-			}
-		}
-
-		printf("\n");
-	} else {
-		printf("Colors (SNES):\n    ");
-
-		for (int i = 0; i < 16; i++) {
-
-			printf("%2d    ", i);
-			if (i == 7) {
-				printf("\n    ");
-			}
-		}
-
-		for (int i = 0; i < 16; i++) {
-			printf("\n%2d  ", i);
-			for (int j = 0; j < 16; j++) {
-				printf("%04x  ", PPU.CGDATA[i*16 + j]);
-				if (j == 7) {
-					printf("\n    ");
-				}
-			}
-		}
-
-		printf("\n");
+	default:
+		return ("???");
 	}
 }
 
-static void debug_print_sprites ()
+void S9xDebugPrintWhatsUsed(std::ostream &out) {
+	char string[2048];
+
+	sprintf(string, "V-line: %ld, H-Pos: %ld, \n", (long)CPU.V_Counter, (long)CPU.Cycles);
+	out << string;
+
+	sprintf(string, "Screen mode: %d%s\n", PPU.BGMode, (PPU.BGMode <= 1 && (Memory.FillRAM[0x2105] & 8) ? " (BG#2 Priority)" : ""));
+	out << string;
+
+	sprintf(string, "Brightness: %d%s\n", PPU.Brightness, (Memory.FillRAM[0x2100] & 0x80 ? " (screen blanked)" : ""));
+	out << string;
+
+	if (Memory.FillRAM[0x2133] & 1)
+		out << "Interlace\n";
+
+	if (Memory.FillRAM[0x2133] & 4)
+		out << "240 line visible\n";
+
+	if (Memory.FillRAM[0x2133] & 8)
+		out << "Pseudo 512 pixels horizontal resolution\n";
+
+	if (Memory.FillRAM[0x2133] & 0x40)
+		out << "Mode 7 priority per pixel\n";
+
+	if (PPU.BGMode == 7) {
+		out << "Mode 7 enabled:\n";
+		out << "\tScreen repeat: " << ((Memory.FillRAM[0x211a] & 0xc0) >> 6) << '\n';
+
+		if (Memory.FillRAM[0x211a] & 3)
+			out << "\tFlipping enabled\n";
+
+		// Sign extend 13 bit values to 16 bit values...
+		if (PPU.CentreX & (1 << 12))
+			PPU.CentreX |= 0xe000;
+
+		if (PPU.CentreY & (1 << 12))
+			PPU.CentreY |= 0xe000;
+
+		sprintf(string, "\tMatrix A: %.3f, B: %.3f, C: %.3f, D: %.3f, Centre X: %d Y:%d\n",
+			(double)PPU.MatrixA / 256, (double)PPU.MatrixB / 256,
+			(double)PPU.MatrixC / 256, (double)PPU.MatrixD / 256,
+			PPU.CentreX, PPU.CentreY);
+		out << string;
+	}
+
+	if (Memory.FillRAM[0x2130] & 1)
+		out << "32K colour mode\n";
+
+	if ((Memory.FillRAM[0x2106] & 0xf0) && (Memory.FillRAM[0x2106] & 0x0f)) {
+		out << "Mosaic effect(" << PPU.Mosaic << ") on ";
+
+		bool first = true;
+		for (int i = 0; i < 4; i++)
+			if (Memory.FillRAM[0x2106] & (1 << i)) {
+				if (first) first = false;
+				else out << ", ";
+				out << "BG" << i;
+			}
+		out << '\n';
+	}
+
+	if (PPU.HVBeamCounterLatched)
+		out << "V and H beam pos latched\n";
+
+	if (Memory.FillRAM[0x4200] & 0x20)
+		out << "V-IRQ enabled at " << PPU.IRQVBeamPos << '\n';
+
+	if (Memory.FillRAM[0x4200] & 0x10)
+		out << "H-IRQ enabled at " << PPU.IRQHBeamPos << '\n';
+
+	if (Memory.FillRAM[0x4200] & 0x80)
+		out << "V-blank NMI enabled\n";
+
+	for (int i = 0; i < 8; i++)
+	{
+		if (missing.hdma_this_frame & (1 << i))
+		{
+			sprintf(string, "H-DMA %d [%d] 0x%02X%04X->0x21%02X %s %s 0x%02X%04X %s addressing\n",
+				i, DMA[i].TransferMode, DMA[i].ABank, DMA[i].AAddress, DMA[i].BAddress,
+				DMA[i].AAddressDecrement ? "dec" : "inc",
+				DMA[i].Repeat ? "repeat" : "continue",
+				DMA[i].IndirectBank, DMA[i].IndirectAddress,
+				DMA[i].HDMAIndirectAddressing ? "indirect" : "absolute");
+			out << string;
+		}
+	}
+
+	for (int i = 0; i < 8; i++)
+	{
+		if (missing.dma_this_frame & (1 << i))
+		{
+			sprintf(string, "DMA %d [%d] 0x%02X%04X->0x21%02X Num: %d %s\n",
+				i, DMA[i].TransferMode, DMA[i].ABank, DMA[i].AAddress, DMA[i].BAddress, DMA[i].TransferBytes,
+				DMA[i].AAddressFixed ? "fixed" : (DMA[i].AAddressDecrement ? "dec" : "inc"));
+			out << string;
+		}
+	}
+
+	sprintf(string, "VRAM write address: 0x%04x(%s), Full Graphic: %d, Address inc: %d\n",
+		PPU.VMA.Address,
+		PPU.VMA.High ? "Byte" : "Word",
+		PPU.VMA.FullGraphicCount, PPU.VMA.Increment);
+	out << string;
+
+	for (int i = 0; i < 4; i++)
+	{
+		sprintf(string, "BG%d: VOffset:%d, HOffset:%d, W:%d, H:%d, TS:%d, BA:0x%04x, TA:0x%04X\n",
+			i, PPU.BG[i].VOffset, PPU.BG[i].HOffset,
+			(PPU.BG[i].SCSize & 1) * 32 + 32,
+			(PPU.BG[i].SCSize & 2) * 16 + 32,
+			PPU.BG[i].BGSize * 8 + 8,
+			PPU.BG[i].SCBase,
+			PPU.BG[i].NameBase);
+		out << string;
+	}
+
+	const char	*s = "";
+
+	switch ((Memory.FillRAM[0x2130] & 0xc0) >> 6)
+	{
+	case 0:
+		s = "always on";
+		break;
+
+	case 1:
+		s = "inside";
+		break;
+
+	case 2:
+		s = "outside";
+		break;
+
+	case 3:
+		s = "always off";
+		break;
+	}
+
+	out << "Main screen (" << s << "):";
+	for (int i = 0; i < 5; i++)
+	{
+		if (Memory.FillRAM[0x212c] & (1 << i))
+		{
+			switch (i)
+			{
+			case 0:
+			case 1:
+			case 2:
+			case 3:
+				out << " BG" << i;
+				break;
+
+			case 4:
+				out << " OBJ";
+				break;
+			}
+		}
+	}
+	out << '\n';
+
+	switch ((Memory.FillRAM[0x2130] & 0x30) >> 4)
+	{
+	case 0:
+		s = "always on";
+		break;
+
+	case 1:
+		s = "inside";
+		break;
+
+	case 2:
+		s = "outside";
+		break;
+
+	case 3:
+		s = "always off";
+		break;
+	}
+
+	out << "Subscreen (" << s << "):";
+	for (int i = 0; i < 5; i++)
+	{
+		if (Memory.FillRAM[0x212d] & (1 << i))
+		{
+			switch (i)
+			{
+			case 0:
+			case 1:
+			case 2:
+			case 3:
+				out << " BG" << i;
+				break;
+
+			case 4:
+				out << " OBJ";
+				break;
+			}
+		}
+	}
+	out << '\n';
+
+	if ((Memory.FillRAM[0x2131] & 0x3f))
+	{
+		if (Memory.FillRAM[0x2131] & 0x80)
+		{
+			if (Memory.FillRAM[0x2130] & 0x02)
+				out << "Subscreen subtract";
+			else
+				out << "Fixed colour subtract";
+		}
+		else
+		{
+			if (Memory.FillRAM[0x2130] & 0x02)
+				out << "Subscreen addition";
+			else
+				out << "Fixed colour addition";
+		}
+
+		if (Memory.FillRAM[0x2131] & 0x40)
+			out << " (half):";
+		else
+			out << ":";
+
+		for (int i = 0; i < 6; i++)
+		{
+			if (Memory.FillRAM[0x2131] & (1 << i))
+			{
+				switch (i)
+				{
+				case 0:
+				case 1:
+				case 2:
+				case 3:
+					out << " BG" << i;
+					break;
+
+				case 4:
+					out << " OBJ";
+					break;
+
+				case 5:
+					out << " BACK";
+					break;
+				}
+			}
+		}
+		out << '\n';
+	}
+
+	sprintf(string, "Window 1 (%d, %d, %02x, %02x): ", PPU.Window1Left, PPU.Window1Right, Memory.FillRAM[0x212e], Memory.FillRAM[0x212f]);
+	out << string;
+
+	for (int i = 0; i < 6; i++)
+	{
+		if (PPU.ClipWindow1Enable[i])
+		{
+			switch (i)
+			{
+			case 0:
+				sprintf(string, "BG0(%s-%s), ", PPU.ClipWindow1Inside[0] ? "I" : "O", debug_clip_fn(PPU.ClipWindowOverlapLogic[0]));
+				break;
+
+			case 1:
+				sprintf(string, "BG1(%s-%s), ", PPU.ClipWindow1Inside[1] ? "I" : "O", debug_clip_fn(PPU.ClipWindowOverlapLogic[1]));
+				break;
+
+			case 2:
+				sprintf(string, "BG2(%s-%s), ", PPU.ClipWindow1Inside[2] ? "I" : "O", debug_clip_fn(PPU.ClipWindowOverlapLogic[2]));
+				break;
+
+			case 3:
+				sprintf(string, "BG3(%s-%s), ", PPU.ClipWindow1Inside[3] ? "I" : "O", debug_clip_fn(PPU.ClipWindowOverlapLogic[3]));
+				break;
+
+			case 4:
+				sprintf(string, "OBJ(%s-%s), ", PPU.ClipWindow1Inside[4] ? "I" : "O", debug_clip_fn(PPU.ClipWindowOverlapLogic[4]));
+				break;
+
+			case 5:
+				sprintf(string, "COL(%s-%s), ", PPU.ClipWindow1Inside[5] ? "I" : "O", debug_clip_fn(PPU.ClipWindowOverlapLogic[5]));
+				break;
+			}
+			out << string;
+		}
+	}
+
+	sprintf(string, "\n");
+	out << string;
+
+	sprintf(string, "Window 2 (%d, %d): ", PPU.Window2Left, PPU.Window2Right);
+	out << string;
+
+	for (int i = 0; i < 6; i++)
+	{
+		if (PPU.ClipWindow2Enable[i])
+		{
+			switch (i)
+			{
+			case 0:
+				sprintf(string, "BG0(%s), ", PPU.ClipWindow2Inside[0] ? "I" : "O");
+				break;
+
+			case 1:
+				sprintf(string, "BG1(%s), ", PPU.ClipWindow2Inside[1] ? "I" : "O");
+				break;
+
+			case 2:
+				sprintf(string, "BG2(%s), ", PPU.ClipWindow2Inside[2] ? "I" : "O");
+				break;
+
+			case 3:
+				sprintf(string, "BG3(%s), ", PPU.ClipWindow2Inside[3] ? "I" : "O");
+				break;
+
+			case 4:
+				sprintf(string, "OBJ(%s), ", PPU.ClipWindow2Inside[4] ? "I" : "O");
+				break;
+
+			case 5:
+				sprintf(string, "COL(%s), ", PPU.ClipWindow2Inside[5] ? "I" : "O");
+				break;
+			}
+			out << string;
+		}
+	}
+
+	sprintf(string, "\n");
+	out << string;
+
+	sprintf(string, "Fixed colour: %02x%02x%02x, \n", PPU.FixedColourRed, PPU.FixedColourGreen, PPU.FixedColourBlue);
+	out << string;
+}
+
+void S9xDebugPrintWhatsMissing(std::ostream &out)
 {
+	char string[2048];
+	sprintf(string, "Processor: ");
+	out << string;
+
+	if (missing.emulate6502) {
+		sprintf(string, "emulation mode, ");
+		out << string;
+	}
+
+	if (missing.decimal_mode) {
+		sprintf(string, "decimal mode, ");
+		out << string;
+	}
+
+	if (missing.mv_8bit_index) {
+		sprintf(string, "MVP/MVN with 8bit index registers and XH or YH > 0, ");
+		out << string;
+	}
+
+	if (missing.mv_8bit_acc) {
+		sprintf(string, "MVP/MVN with 8bit accumulator > 255, ");
+		out << string;
+	}
+
+	sprintf(string, "\n");
+	out << string;
+
+	sprintf(string, "Screen modes used: ");
+	out << string;
+
+	for (int i = 0; i < 8; i++)
+		if (missing.modes[i]) {
+			sprintf(string, "%d, ", i);
+			out << string;
+		}
+
+	sprintf(string, "\n");
+	out << string;
+
+	if (missing.interlace) {
+		sprintf(string, "Interlace, ");
+		out << string;
+	}
+
+	if (missing.pseudo_512) {
+		sprintf(string, "Pseudo 512 pixels horizontal resolution, ");
+		out << string;
+	}
+
+	if (missing.lines_239) {
+		sprintf(string, "240 lines visible, ");
+		out << string;
+	}
+	if (missing.sprite_double_height) {
+		sprintf(string, "double-hight sprites, ");
+		out << string;
+	}
+
+	sprintf(string, "\n");
+	out << string;
+
+	if (missing.mode7_fx) {
+		sprintf(string, "Mode 7 rotation/scaling, ");
+		out << string;
+	}
+
+	if (missing.matrix_read) {
+		sprintf(string, "Mode 7 read matrix registers, ");
+		out << string;
+	}
+
+	if (missing.mode7_flip) {
+		sprintf(string, "Mode 7 flipping, ");
+		out << string;
+	}
+
+	if (missing.mode7_bgmode) {
+		sprintf(string, "Mode 7 priority per pixel, ");
+		out << string;
+	}
+
+	if (missing.direct) {
+		sprintf(string, "Direct 32000 colour mode, ");
+		out << string;
+	}
+
+	sprintf(string, "\n");
+	out << string;
+
+	if (missing.mosaic) {
+		sprintf(string, "Mosaic effect, ");
+		out << string;
+	}
+	if (missing.subscreen) {
+		sprintf(string, "Subscreen enabled, ");
+		out << string;
+	}
+
+	if (missing.subscreen_add) {
+		sprintf(string, "Subscreen colour add, ");
+		out << string;
+	}
+
+	if (missing.subscreen_sub) {
+		sprintf(string, "Subscreen colour subtract, ");
+		out << string;
+	}
+
+	if (missing.fixed_colour_add) {
+		sprintf(string, "Fixed colour add, ");
+		out << string;
+	}
+
+	if (missing.fixed_colour_sub) {
+		sprintf(string, "Fixed colour subtract, ");
+		out << string;
+	}
+
+	sprintf(string, "\n");
+	out << string;
+
+	sprintf(string, "Window 1 enabled on: ");
+	out << string;
+	debug_print_window(out, missing.window1);
+
+	sprintf(string, "\n");
+	out << string;
+
+	sprintf(string, "Window 2 enabled on: ");
+	out << string;
+	debug_print_window(out, missing.window2);
+
+	sprintf(string, "\n");
+	out << string;
+
+	if (missing.bg_offset_read) {
+		sprintf(string, "BG offset read, ");
+		out << string;
+	}
+
+	if (missing.oam_address_read) {
+		sprintf(string, "OAM address read, ");
+		out << string;
+	}
+	if (missing.sprite_priority_rotation) {
+		sprintf(string, "Sprite priority rotation, ");
+		out << string;
+	}
+	if (missing.fast_rom) {
+		sprintf(string, "Fast 3.58MHz ROM access enabled, ");
+		out << string;
+	}
+	if (missing.matrix_multiply) {
+		sprintf(string, "Matrix multiply 16bit by 8bit used, ");
+		out << string;
+	}
+	sprintf(string, "\n");
+	out << string;
+
+	if (missing.virq) {
+		sprintf(string, "V-IRQ used at line %d, ", missing.virq_pos);
+		out << string;
+	}
+	if (missing.hirq) {
+		sprintf(string, "H-IRQ used at position %d, ", missing.hirq_pos);
+		out << string;
+	}
+	sprintf(string, "\n");
+	out << string;
+
+	if (missing.h_v_latch) {
+		sprintf(string, "H and V-Pos latched, ");
+		out << string;
+	}
+	if (missing.h_counter_read) {
+		sprintf(string, "H-Pos read, ");
+		out << string;
+	}
+	if (missing.v_counter_read) {
+		sprintf(string, "V-Pos read, ");
+		out << string;
+	}
+	sprintf(string, "\n");
+	out << string;
+
+	if (missing.oam_read) {
+		sprintf(string, "OAM read, ");
+		out << string;
+	}
+	if (missing.vram_read) {
+		sprintf(string, "VRAM read, ");
+		out << string;
+	}
+	if (missing.cgram_read) {
+		sprintf(string, "CG-RAM read, ");
+		out << string;
+	}
+	if (missing.wram_read) {
+		sprintf(string, "WRAM read, ");
+		out << string;
+	}
+	if (missing.dma_read) {
+		sprintf(string, "DMA read, ");
+		out << string;
+	}
+	if (missing.vram_inc) {
+		sprintf(string, "VRAM inc: %d, ", missing.vram_inc);
+		out << string;
+	}
+	if (missing.vram_full_graphic_inc) {
+		sprintf(string, "VRAM full graphic inc: %d, ", missing.vram_full_graphic_inc);
+		out << string;
+	}
+	sprintf(string, "\n");
+	out << string;
+
+	for (int i = 0; i < 8; i++)
+	{
+		if (missing.hdma[i].used)
+		{
+			sprintf(string, "HDMA %d 0x%02X%04X->0x21%02X %s, ",
+				i, missing.hdma[i].abus_bank, missing.hdma[i].abus_address, missing.hdma[i].bbus_address,
+				missing.hdma[i].indirect_address ? "indirect" : "absolute");
+			out << string;
+
+			if (missing.hdma[i].force_table_address_write) {
+				sprintf(string, "Forced address write, ");
+				out << string;
+			}
+
+			if (missing.hdma[i].force_table_address_read) {
+				sprintf(string, "Current address read, ");
+				out << string;
+			}
+
+			if (missing.hdma[i].line_count_write) {
+				sprintf(string, "Line count write, ");
+				out << string;
+			}
+
+			if (missing.hdma[i].line_count_read) {
+				sprintf(string, "Line count read, ");
+				out << string;
+			}
+
+			sprintf(string, "\n");
+			out << string;
+		}
+	}
+
+	for (int i = 0; i < 8; i++)
+	{
+		if (missing.dma_channels & (1 << i))
+		{
+			sprintf(string, "DMA %d [%d] 0x%02X%04X->0x21%02X Num: %d %s, \n",
+				i, DMA[i].TransferMode, DMA[i].ABank, DMA[i].AAddress, DMA[i].BAddress, DMA[i].TransferBytes,
+				DMA[i].AAddressFixed ? "fixed" : (DMA[i].AAddressDecrement ? "dec" : "inc"));
+			out << string;
+		}
+	}
+
+	if (missing.unknownppu_read) {
+		sprintf(string, "Read from unknown PPU register: $%04X, \n", missing.unknownppu_read);
+		out << string;
+	}
+
+	if (missing.unknownppu_write) {
+		sprintf(string, "Write to unknown PPU register: $%04X, \n", missing.unknownppu_write);
+		out << string;
+	}
+
+	if (missing.unknowncpu_read) {
+		sprintf(string, "Read from unknown CPU register: $%04X, \n", missing.unknowncpu_read);
+		out << string;
+	}
+
+	if (missing.unknowncpu_write) {
+		sprintf(string, "Write to unknown CPU register: $%04X, \n", missing.unknowncpu_write);
+		out << string;
+	}
+
+	if (missing.unknowndsp_read) {
+		sprintf(string, "Read from unknown DSP register: $%04X, \n", missing.unknowndsp_read);
+		out << string;
+	}
+
+	if (missing.unknowndsp_write) {
+		sprintf(string, "Write to unknown DSP register: $%04X, \n", missing.unknowndsp_write);
+		out << string;
+	}
+}
+
+void S9xDebugPrintStatus(std::ostream &out) {
+	char	string[512];
+	debug_cpu_op_print(string, Registers.PB, Registers.PCw);
+	out << string << '\n';
+}
+
+void S9xDebugPrintVectors (std::ostream &out)
+{
+	struct {
+		const char *name;
+		uint16 addr8;
+		uint16 addr16;
+	} vectors[6] = {
+		{ "ABT", 0xFFF8, 0xFFE8 },
+		{ "BRK", 0xFFFE, 0xFFE6 },
+		{ "COP", 0xFFF4, 0xFFE4 },
+		{ "IRQ", 0xFFFE, 0xFFEE },
+		{ "NMI", 0xFFFA, 0xFFEA },
+		{ "RES", 0xFFFC, 0xFFFC }
+	};
+	char string[512];
+	out << "Vectors:\n";
+	out << "      8 Bit   16 Bit \n";
+	for (int i = 0; i < 6; i++) {
+		sprintf(string, "%s $00:%04X|$00:%04X", vectors[i].name, S9xDebugGetWord(vectors[i].addr8), S9xDebugGetWord(vectors[i].addr16));
+		debug_line_print(string, out);
+	}
+}
+
+void S9xDebugPrintColors (std::ostream &out, bool rgb_mode) {
+	char string[512];
+	if (rgb_mode) {
+		out << "Colors (RGB):\n    ";
+
+		for (int i = 0; i < 16; i++) {
+
+			out << std::setw(2) << i << "      ";
+			if (i == 7) {
+				out << "\n    ";
+			}
+		}
+
+		for (int i = 0; i < 16; i++) {
+			sprintf(string, "\n%2d  ", i);
+			out << string;
+			for (int j = 0; j < 16; j++) {
+				sprintf(string, "%06x  ", ((PPU.CGDATA[i * 16 + j] & 0x1f) << 16) | (((PPU.CGDATA[i * 16 + j] >> 5) & 0x1f) << 8) | ((PPU.CGDATA[i * 16 + j] >> 10) & 0x1f));
+				out << string;
+				if (j == 7) {
+					out << "\n    ";
+				}
+			}
+		}
+
+		out << '\n';
+	} else {
+		out << "Colors (SNES):\n    ";
+
+		for (int i = 0; i < 16; i++) {
+
+			sprintf(string, "%2d    ", i);
+			out << string;
+			if (i == 7) {
+				out << "\n    ";
+			}
+		}
+
+		for (int i = 0; i < 16; i++) {
+			sprintf(string, "\n%2d  ", i);
+			out << string;
+			for (int j = 0; j < 16; j++) {
+				sprintf(string, "%04x  ", PPU.CGDATA[i*16 + j]);
+				out << string;
+				if (j == 7) {
+					out << "\n    ";
+				}
+			}
+		}
+
+		out << '\n';
+	}
+}
+
+void S9xDebugPrintSprites (std::ostream &out)
+{
+	char string[2048];
 	int	SmallWidth, LargeWidth, SmallHeight, LargeHeight;
 
 	switch ((Memory.FillRAM[0x2101] >> 5) & 7)
@@ -1436,7 +2121,7 @@ static void debug_print_sprites ()
 			break;
 	}
 
-	printf("\
+	sprintf(string, "\
 Sprites: Small: %dx%d\n\
          Large: %dx%d\n\
          OAMAddr: 0x%04x\n\
@@ -1451,117 +2136,163 @@ Sprites: Small: %dx%d\n\
 		   PPU.OBJNameBase,
 		   PPU.OBJNameSelect,
 		   PPU.FirstSprite);
+	out << string;
 
-	printf("\nOAM:");
+	out << "\nOAM:";
 	for (int i = 0; i < 128; i++)
 	{
-		if (i % 4 == 0)
-			printf("\n%2x  ", i);
-		else
-			printf("  |  ");
-		printf("X:%3d Y:%3d %c%c%d%c",
+		if (i % 4 == 0) {
+			sprintf(string, "\n%2x  ", i);
+			out << string;
+		} else {
+			out << "  |  ";
+		}
+		sprintf(string, "X:%3d Y:%3d %c%c%d%c",
 			   PPU.OBJ[i].HPos,
 			   PPU.OBJ[i].VPos,
 			   PPU.OBJ[i].VFlip ? 'V' : 'v',
 			   PPU.OBJ[i].HFlip ? 'H' : 'h',
 			   PPU.OBJ[i].Priority,
 			   PPU.OBJ[i].Size ? 'S' : 's');
-
+		out << string;
 	}
-	printf("\n");
+	out << '\n';
 }
 
-static int get_breakpoint_for (uint32 addr) {
+void S9xDebugPrintBreakpoints (std::ostream &out) {
+	out << "Active breakpoints:\n";
+	for (int i = 0; i < 5; i++) {
+		if (S9xBreakpoint[i].Enabled) {
+			out << "  " << i << ": $" << std::setw(6) << std::setfill('0') << S9xBreakpoint[i].Address << '\n';
+		}
+	}
+}
+
+void S9xDebugPrintWatchpoints (std::ostream &out) {
+	out << "Active watchpoints:\n";
+	for (int i = 0; i < 6; i++) {
+		if (S9xWatchpoint[i].Mode != WATCH_MODE_NONE) {
+			out << "  " << i << ": $" << std::setw(6) << std::setfill('0') << S9xWatchpoint[i].Address << " (";
+			out << (S9xWatchpoint[i].Mode == WATCH_MODE_READ ? "read" :
+				(S9xWatchpoint[i].Mode == WATCH_MODE_WRITE ? "write" : "both"));
+			out << ")\n";
+		}
+	}
+}
+
+int S9xSetBreakpoint(uint32 addr) {
 	int empty = -1;
 	for (int i = 0; i < 5; i++) {
 		if (S9xBreakpoint[i].Address == addr && S9xBreakpoint[i].Enabled) {
 			return i;
-		} else if (empty == -1 && !S9xBreakpoint[i].Enabled) {
+		}
+		else if (empty == -1 && !S9xBreakpoint[i].Enabled) {
 			empty = i;
 		}
 	}
-	if (empty != -1) S9xBreakpoint[empty].Address = addr;
+	if (empty != -1) {
+		S9xBreakpoint[empty].Address = addr;
+		S9xBreakpoint[empty].Enabled = TRUE;
+		CPU.Flags |= BREAK_FLAG;
+	}
 	return empty;
 }
 
-static int get_watchpoint_for (uint32 addr) {
+int S9xSetWatchpoint(uint32 addr, uint8 type) {
 	int empty = -1;
 	for (int i = 0; i < 6; i++) {
 		if (S9xWatchpoint[i].Address == addr && S9xWatchpoint[i].Mode != WATCH_MODE_NONE) {
 			return i;
-		} else if (empty == -1 && S9xWatchpoint[i].Mode == WATCH_MODE_NONE) {
+		}
+		else if (empty == -1 && S9xWatchpoint[i].Mode == WATCH_MODE_NONE) {
 			empty = i;
 		}
 	}
 	if (empty != -1) {
 		S9xWatchpoint[empty].Address = addr;
 		S9xWatchpoint[empty].RealAddress = Memory.Map[(addr & 0xffffff) >> MEMMAP_SHIFT] + (addr & 0xffff);
+		S9xWatchpoint[empty].Mode = type;
+		CPU.Flags |= WATCH_FLAG;
 	}
 	return empty;
 }
 
-static void debug_print_breakpoints () {
-	printf("Active breakpoints:\n");
-	for (int i = 0; i < 5; i++) {
-		if (S9xBreakpoint[i].Enabled) {
-			printf("  %d: $%06x\n", i, S9xBreakpoint[i].Address);
-		}
+bool S9xRemoveBreakpoint(int i) {
+	if (i <= 4 && i >= 0) {
+		S9xBreakpoint[i].Enabled = FALSE;
+		return true;
 	}
+	return false;
 }
 
-static void debug_print_watchpoints () {
-	printf("Active watchpoints:\n");
-	for (int i = 0; i < 6; i++) {
-		if (S9xWatchpoint[i].Mode != WATCH_MODE_NONE) {
-			printf("  %d: $%06x (%s)\n", i, S9xWatchpoint[i].Address,
-					S9xWatchpoint[i].Mode == WATCH_MODE_READ ? "read" :
-					(S9xWatchpoint[i].Mode == WATCH_MODE_WRITE ? "write" : "both"));
-		}
+bool S9xRemoveWatchpoint(int i) {
+	if (i <= 5 && i >= 0) {
+		S9xWatchpoint[i].Mode = WATCH_MODE_NONE;
+		return true;
 	}
+	return false;
 }
 
-static void debug_print_status () {
-	char	string[512];
-	debug_cpu_op_print(string, Registers.PB, Registers.PCw);
-	debug_line_print(string);
+void S9xDebugStepOver() {
+	uint8 nextOp = S9xDebugGetByte((uint32)Registers.PB | ((uint32)Registers.PCw << 16));
+	if (nextOp == 0x20 || nextOp == 0x22) {	// JSR or JSL
+		S9xBreakpoint[5].Enabled = TRUE;
+		S9xBreakpoint[5].Address = (uint32)Registers.PB + ((uint32)Registers.PCw << 16) + (nextOp == 0x20 ? 3 : 4);
+		CPU.Flags |= BREAK_FLAG;
+		CPU.Flags |= CONTINUE_FLAG;
+	}
+	else {
+		CPU.Flags |= SINGLE_STEP_FLAG;
+	}
+
+	S9xStopDebug();
 }
 
-static void debug_process_command (const char *Line)
+void S9xDebugStepInto() {
+	CPU.Flags |= SINGLE_STEP_FLAG;
+	S9xStopDebug();
+}
+
+void S9xDebugContinue() {
+	CPU.Flags |= CONTINUE_FLAG;
+	S9xStopDebug();
+}
+
+void S9xDebugCommand (const char *Line, std::ostream &out)
 {
 	uint8	Bank = Registers.PB;
 	uint32	Address = Registers.PCw;
 	char	string[512];
 
-	if (strncasecmp(Line, "status", 6) == 0)
-	{
-		debug_print_status();
+	if (strncasecmp(Line, "status", 6) == 0) {
+		S9xDebugPrintStatus(out);
 	}
 
 	else if (strncasecmp(Line, "info", 4) == 0)
 	{
 		if (strncasecmp(Line + 5, "vectors", 7) == 0)
-			debug_print_vectors();
+			S9xDebugPrintVectors(out);
 		else if (strncasecmp(Line + 5, "colors-rgb", 10) == 0 ||
 				strncasecmp(Line + 5, "colours-rgb", 11) == 0)
-			debug_print_colors(true);
+			S9xDebugPrintColors(out, true);
 		else if (strncasecmp(Line + 5, "colors", 6) == 0 ||
 				strncasecmp(Line + 5, "colours", 6) == 0 ||
 				strncasecmp(Line + 5, "colors-snes", 11) == 0 ||
 				strncasecmp(Line + 5, "colours-snes", 12) == 0)
-			debug_print_colors(false);
+			S9xDebugPrintColors(out, false);
 		else if (strncasecmp(Line + 5, "sprites", 7) == 0 ||
 				strncasecmp(Line + 5, "oam", 3) == 0)
-			debug_print_sprites();
+			S9xDebugPrintSprites(out);
 		else if (strncasecmp(Line + 5, "missing", 7) == 0)
-			debug_whats_missing();
+			S9xDebugPrintWhatsMissing(out);
 		else if (strncasecmp(Line + 5, "used", 4) == 0)
-			debug_whats_used();
+			S9xDebugPrintWhatsUsed(out);
 		else if (strncasecmp(Line + 5, "breakpoints", 11) == 0)
-			debug_print_breakpoints();
+			S9xDebugPrintBreakpoints(out);
 		else if (strncasecmp(Line + 5, "watchpoints", 11) == 0)
-			debug_print_watchpoints();
+			S9xDebugPrintWatchpoints(out);
 		else
-			printf("Usage: info [vectors | colors-snes | colors-rgb | sprites | missing | used | breakpoints | watchpoints]\n");
+			out << "Usage: info [vectors | colors-snes | colors-rgb | sprites | missing | used | breakpoints | watchpoints]\n";
 	}
 
 	else if (Line[0] == 'x') { // eXamine memory
@@ -1612,7 +2343,7 @@ static void debug_process_command (const char *Line)
 
 		// Parse address
 		if (p[0] != ' ' || p[1] != '$' || !((p[2] >= '0' && p[2] <= '9') || (p[2] >= 'A' && p[2] <= 'Z') || (p[2] >= 'a' && p[2] <= 'z'))) {
-			printf("Bad examine command.\nFormat: x/{count}{wordsize}{format} ${addr}\n");
+			out << "Bad examine command.\nFormat: x/{count}{wordsize}{format} ${addr}\n";
 			return;
 		}
 		p += 2;
@@ -1628,7 +2359,7 @@ static void debug_process_command (const char *Line)
 				address *= 16;
 				address += *p - 'a' + 10;
 			} else {
-				printf("Bad examine command.\nFormat: x/{count}{wordsize}{format} ${addr}\n");
+				out << "Bad examine command.\nFormat: x/{count}{wordsize}{format} ${addr}\n";
 				return;
 			}
 		}
@@ -1637,7 +2368,8 @@ static void debug_process_command (const char *Line)
 		int perline = (wordsize == 1 ? 16 : (wordsize == 2 ? 8 : 4));
 		for (int i = 0; i < count; i++) {
 			if (i % perline == 0) {
-				printf("\n$%06x:  ", address);
+				sprintf(string, "\n$%06x:  ", address);
+				out << string;
 			}
 			uint32 value = 0;
 			for (int j = 0; j < wordsize; j++) {
@@ -1645,49 +2377,47 @@ static void debug_process_command (const char *Line)
 				address += 1;
 			}
 
-			printf(wordsize == 1 ? 
+			sprintf(string, wordsize == 1 ? 
 				(format == 0 ? " %3d" : " %02x")
 					:
 				(wordsize == 2 ? 
 				(format == 0 ? " %5d" : " %04x")
 				    :
 				(format == 0 ? " %7d" : " %06x")), value);
+			out << string;
 		}
-		printf("\n");
+		out << '\n';
 	}
 
 	else if (strncasecmp(Line, "dump", 4) == 0)
 	{
-		int	Count;
-
-		if (sscanf(&Line[4], "%x %d", &Address, &Count) == 2)
+		int count;
+		FILE *fs;
+		if (sscanf(&Line[4], "$%x %d", &Address, &count) == 2)
 		{
-			FILE	*fs;
-
-			sprintf(string, "%06x%05d.sd2", Address, Count);
+			sprintf(string, "%06x%05d.sd2", Address, count);
 			fs = fopen(string, "wb");
-			if (fs)
-			{
-				for (int i = 0; i < Count; i++)
+			if (fs) {
+				for (int i = 0; i < count; i++)
 					putc(S9xDebugGetByte(Address + i), fs);
 				fclose(fs);
+				out << "Dumped " << count << " bytes to " << string << '\n';
+			} else {
+				out << "Can't open " << string << " for writing\n";
 			}
-			else
-				printf("Can't open %s for writing\n", string);
 		}
 		else
-			printf("Usage: dump start_address_in_hex count_in_decimal\n");
+			out << "Usage: dump $addr count\n";
 	}
 
 	else if (*Line == 'R' || *Line == 'r')	// reset
 	{
-		printf("Are you sure you want to reset the emulator? [y/n] ");
-		const char * p = fgets(string, sizeof(string) - 1, stdin);
-		if (p[0] == 'y' || p[0] == 'Y') {
+		//sprintf(string, "Are you sure you want to reset the emulator? [y/n] ");
+		//const char * p = fgets(string, sizeof(string) - 1, stdin);
+		//if (p[0] == 'y' || p[0] == 'Y') {
 			S9xReset();
-			printf("SNES reset.\n");
-			CPU.Flags |= DEBUG_MODE_FLAG;
-		}
+			out << "SNES reset.\n";
+		//}
 	}
 
 	else if (strncasecmp(Line, "trace", 5) == 0)
@@ -1697,12 +2427,12 @@ static void debug_process_command (const char *Line)
 
 			if (SA1.Flags & TRACE_FLAG)
 			{
-				printf("Tracing SA1 instructions to trace_sa1.log.\n");
+				out << "Tracing SA1 instructions to trace_sa1.log\n";
 				ENSURE_TRACE_OPEN(trace2, "trace_sa1.log", "wb")
 			}
 			else
 			{
-				printf("SA1 CPU instruction tracing disabled.\n");
+				out << "SA1 CPU instruction tracing disabled\n";
 				fclose(trace2);
 				trace2 = NULL;
 			}
@@ -1712,38 +2442,38 @@ static void debug_process_command (const char *Line)
 
 			if (CPU.Flags & TRACE_FLAG)
 			{
-				printf("Tracing SNES CPU instructions to trace.log.\n");
+				out << "Tracing SNES CPU instructions to trace.log\n";
 				ENSURE_TRACE_OPEN(trace, "trace.log", "wb")
 			}
 			else
 			{
-				printf("CPU instruction tracing disabled.\n");
+				out << "CPU instruction tracing disabled\n";
 				fclose(trace);
 				trace = NULL;
 			}
 		}
 		else if (strncasecmp(Line + 6, "hcevent", 7) == 0) {
 			Settings.TraceHCEvent = !Settings.TraceHCEvent;
-			printf("HC event tracing %s.\n", Settings.TraceHCEvent ? "enabled" : "disabled");
+			out << (Settings.TraceHCEvent ? "HC event tracing enabled\n" : "HC event tracing disabled\n");
 		}
 		else if (strncasecmp(Line + 6, "dma", 3) == 0) {
 			Settings.TraceDMA = !Settings.TraceDMA;
-			printf("DMA tracing %s.\n", Settings.TraceDMA ? "enabled" : "disabled");
+			out << (Settings.TraceDMA ? "DMA tracing enabled\n" : "DMA tracing disabled\n");
 		}
 		else if (strncasecmp(Line + 6, "vram", 4) == 0) {
 			Settings.TraceVRAM = !Settings.TraceVRAM;
-			printf("Non-DMA VRAM write tracing %s.\n", Settings.TraceVRAM ? "enabled" : "disabled");
+			out << (Settings.TraceVRAM ? "Non-DMA VRAM write tracing enabled\n" : "Non-DMA VRAM write tracing disabled\n");
 		}
 		else if (strncasecmp(Line + 6, "hdma", 4) == 0) {
 			Settings.TraceHDMA = !Settings.TraceHDMA;
-			printf("HDMA tracing %s.\n", Settings.TraceHDMA ? "enabled" : "disabled");
+			out << (Settings.TraceHDMA ? "HDMA tracing enabled" : "HDMA tracing disabled\n");
 		}
 		else if (strncasecmp(Line + 6, "unknowns", 8) == 0) {
 			Settings.TraceUnknownRegisters = !Settings.TraceUnknownRegisters;
-			printf("Unknown registers read/write tracing %s.\n", Settings.TraceUnknownRegisters ? "enabled" : "disabled");
+			out << (Settings.TraceUnknownRegisters ? "Unknown registers read/write tracing enabled\n" : "Unknown registers read/write tracing disabled\n");
 		}
 		else {
-			printf("Usage: trace [cpu | sa1 | hcevent | dma | vram | hdma | unknowns]\n");
+			out << "Usage: trace [cpu | sa1 | hcevent | dma | vram | hdma | unknowns]\n";
 		}
 	}
 
@@ -1753,52 +2483,39 @@ static void debug_process_command (const char *Line)
 		for (int l = 0; l < 32; l++)
 		{
 			for (int c = 0; c < 32; c++, p++)
-				printf("%04x,", *p++);
+				out << std::setw(4) << std::setfill('0') << *p++ << ',';
 		}
 	}
 
 	else if (*Line == 'n' || *Line == 'N') {	// Next
-		uint8 nextOp = S9xDebugGetByte((uint32) Address | ((uint32) Bank << 16));
-		if (nextOp == 0x20 || nextOp == 0x22) {	// JSR or JSL
-			S9xBreakpoint[5].Enabled = TRUE;
-			S9xBreakpoint[5].Address = (uint32) Address + ((uint32) Bank << 16) + (nextOp == 0x20 ? 3 : 4);
-			CPU.Flags |= BREAK_FLAG;
-			CPU.Flags |= CONTINUE_FLAG;
-		} else {
-			CPU.Flags |= SINGLE_STEP_FLAG;
-		}
-
-		CPU.Flags &= ~DEBUG_MODE_FLAG;
+		S9xDebugStepOver();
 	}
 
 	else if (*Line == 'b' || *Line == 'B') { // Break
 		uint32 addr;
 		if (sscanf(Line, "%*s $%x", &addr) != 1) {
-			printf("Usage: break ${addr}\n");
+			sprintf(string, "Usage: break ${addr}\n");
 			return;
 		}
 		if (addr > 0xFFFFFF) {
-			printf("Invalid address\n");
+			sprintf(string, "Invalid address\n");
 			return;
 		}
-		int i = get_breakpoint_for(addr);
+		int i = S9xSetBreakpoint(addr);
 		if (i == -1) {
-			printf("Too many breakpoints!\n");
-			return;
+			sprintf(string, "Too many breakpoints!\n");
 		}
-		S9xBreakpoint[i].Enabled = TRUE;
-		CPU.Flags |= BREAK_FLAG;
 	}
 
 	else if (*Line == 'w' || *Line == 'W') { //Watch
 		uint32 addr;
 		uint8 type;
 		if (sscanf(Line, "%*s $%x %s", &addr, string) != 2) {
-			printf("Usage: watch ${addr} {read,write,both}\n");
+			sprintf(string, "Usage: watch ${addr} {read,write,both}\n");
 			return;
 		}
 		if (addr > 0xFFFFFF) {
-			printf("Invalid address\n");
+			sprintf(string, "Invalid address\n");
 			return;
 		}
 		if (string[0] == 'r' || string[0] == 'R')
@@ -1808,65 +2525,59 @@ static void debug_process_command (const char *Line)
 		else if (string[0] == 'b' || string[0] == 'B')
 			type = WATCH_MODE_BOTH;
 		else {
-			printf("Usage: watch ${addr} {read,write,both}\n");
+			sprintf(string, "Usage: watch ${addr} {read,write,both}\n");
 			return;
 		}
 
-		int i = get_watchpoint_for(addr);
+		int i = S9xSetWatchpoint(addr, type);
 		if (i == -1) {
-			printf("Too many watchpoints!\n");
-			return;
+			sprintf(string, "Too many watchpoints!\n");
 		}
-		S9xWatchpoint[i].Mode = type;
-		CPU.Flags |= WATCH_FLAG;
 	}
 
 	else if (strncasecmp(Line, "unwatch", 7) == 0) {
 		int i;
 		if (sscanf(Line, "%*s %d", &i) != 1) {
-			printf("Usage: unwatch {watchpoint num}\n");
+			sprintf(string, "Usage: unwatch {watchpoint num}\n");
 			return;
 		}
 		if (i < 0 || i > 5) {
-			printf("Bad watchpoint number\n");
+			sprintf(string, "Bad watchpoint number\n");
 			return;
 		}
 
-		S9xWatchpoint[i].Mode = WATCH_MODE_NONE;
-		printf("Removed watchpoint %d\n", i);
+		S9xRemoveWatchpoint(i);
+		sprintf(string, "Removed watchpoint %d\n", i);
 	}
 
 	else if (*Line == 'u' || *Line == 'U') { // unbreak
 		int i;
 		if (sscanf(Line, "%*s %d", &i) != 1) {
-			printf("Usage: unbreak {breakpoint num}\n");
+			sprintf(string, "Usage: unbreak {breakpoint num}\n");
 			return;
 		}
 		if (i < 0 || i > 4) {
-			printf("Bad breakpoint number\n");
+			sprintf(string, "Bad breakpoint number\n");
 			return;
 		}
-
-		S9xBreakpoint[i].Enabled = FALSE;
-		printf("Removed breakpoint %d\n", i);
+		S9xRemoveBreakpoint(i);
+		sprintf(string, "Removed breakpoint %d\n", i);
 	}
 
 	else if (*Line == '?' || strncasecmp(Line, "help", 4) == 0)
 	{
 		for (int i = 0; HelpMessage[i] != NULL; i++)
-			debug_line_print(HelpMessage[i]);
+			debug_line_print(HelpMessage[i], out);
 	}
 
-	else if (*Line == 's' || *Line == 'S')
-	{
-		CPU.Flags |= SINGLE_STEP_FLAG;
-		CPU.Flags &= ~DEBUG_MODE_FLAG;
+	else if (*Line == 's' || *Line == 'S') {
+		S9xDebugStepInto();
 	}
 
 	else if (*Line == 'f' || *Line == 'F')
 	{
 		CPU.Flags |= FRAME_ADVANCE_FLAG;
-		CPU.Flags &= ~DEBUG_MODE_FLAG;
+		S9xStopDebug();
 
 		IPPU.RenderThisFrame = TRUE;
 		IPPU.FrameSkip = 0;
@@ -1876,8 +2587,7 @@ static void debug_process_command (const char *Line)
 	}
 
 	else if (*Line == 'c' || *Line == 'C') {
-		CPU.Flags |= CONTINUE_FLAG;
-		CPU.Flags &= ~DEBUG_MODE_FLAG;
+		S9xDebugContinue();
 	}
 
 	else if (*Line == 'd')
@@ -1933,7 +2643,7 @@ static void debug_process_command (const char *Line)
 
 			Address += 16;
 
-			debug_line_print(string);
+			out << string << '\n';
 		}
 
 		Debug.Dump.Bank = Bank;
@@ -1954,7 +2664,7 @@ static void debug_process_command (const char *Line)
 		for (int i = 0; i != 10; i++)
 		{
 			Address += debug_cpu_op_print(string, Bank, Address);
-			debug_line_print(string);
+			out << string << '\n';
 		}
 
 		Debug.Unassemble.Bank = Bank;
@@ -1962,672 +2672,10 @@ static void debug_process_command (const char *Line)
 	}
 
 	else {
-		printf("Invalid command.\n");
+		out << "Invalid command.\n";
 	}
 
 	return;
-}
-
-static void debug_print_window (uint8 *window)
-{
-	for (int i = 0; i < 6; i++)
-	{
-		if (window[i])
-		{
-			switch (i)
-			{
-				case 0:
-					printf("Background 0, ");
-					break;
-
-				case 1:
-					printf("Background 1, ");
-					break;
-
-				case 2:
-					printf("Background 2, ");
-					break;
-
-				case 3:
-					printf("Background 3, ");
-					break;
-
-				case 4:
-					printf("Objects, ");
-					break;
-
-				case 5:
-					printf("Color window, ");
-					break;
-			}
-		}
-	}
-}
-
-static const char * debug_clip_fn (int logic)
-{
-	switch (logic)
-	{
-		case CLIP_OR:
-			return ("OR");
-
-		case CLIP_AND:
-			return ("AND");
-
-		case CLIP_XOR:
-			return ("XOR");
-
-		case CLIP_XNOR:
-			return ("XNOR");
-
-		default:
-			return ("???");
-	}
-}
-
-static void debug_whats_used (void)
-{
-	printf("V-line: %ld, H-Pos: %ld, \n", (long) CPU.V_Counter, (long) CPU.Cycles);
-
-	printf("Screen mode: %d, ", PPU.BGMode);
-
-	if (PPU.BGMode <= 1 && (Memory.FillRAM[0x2105] & 8))
-		printf("(BG#2 Priority), ");
-
-	printf("Brightness: %d, ", PPU.Brightness);
-
-	if (Memory.FillRAM[0x2100] & 0x80)
-		printf("(screen blanked), ");
-
-	printf("\n");
-
-	if (Memory.FillRAM[0x2133] & 1)
-		printf("Interlace, ");
-
-	if (Memory.FillRAM[0x2133] & 4)
-		printf("240 line visible, ");
-
-	if (Memory.FillRAM[0x2133] & 8)
-		printf("Pseudo 512 pixels horizontal resolution, ");
-
-	if (Memory.FillRAM[0x2133] & 0x40)
-		printf("Mode 7 priority per pixel, ");
-
-	printf("\n");
-
-	if (PPU.BGMode == 7 && (Memory.FillRAM[0x211a] & 3))
-		printf("Mode 7 flipping, ");
-
-	if (PPU.BGMode == 7)
-		printf("Mode 7 screen repeat: %d, ", (Memory.FillRAM[0x211a] & 0xc0) >> 6);
-
-	if (Memory.FillRAM[0x2130] & 1)
-		printf("32K colour mode, ");
-
-	printf("\n");
-
-	if (PPU.BGMode == 7)
-	{
-		// Sign extend 13 bit values to 16 bit values...
-		if (PPU.CentreX & (1 << 12))
-			PPU.CentreX |= 0xe000;
-
-		if (PPU.CentreY & (1 << 12))
-			PPU.CentreY |= 0xe000;
-
-		printf("Matrix A: %.3f, B: %.3f, C: %.3f, D: %.3f, Centre X: %d Y:%d, \n",
-		       (double) PPU.MatrixA / 256, (double) PPU.MatrixB / 256,
-		       (double) PPU.MatrixC / 256, (double) PPU.MatrixD / 256,
-		       PPU.CentreX, PPU.CentreY);
-	}
-
-	if ((Memory.FillRAM[0x2106] & 0xf0) && (Memory.FillRAM[0x2106] & 0x0f))
-	{
-		printf("Mosaic effect(%d) on, ", PPU.Mosaic);
-
-		for (int i = 0; i < 4; i++)
-			if (Memory.FillRAM[0x2106] & (1 << i))
-				printf("BG%d, ", i);
-	}
-
-	printf("\n");
-
-	if (PPU.HVBeamCounterLatched)
-		printf("V and H beam pos latched, \n");
-
-	if (Memory.FillRAM[0x4200] & 0x20)
-		printf("V-IRQ enabled at %d, \n", PPU.IRQVBeamPos);
-
-	if (Memory.FillRAM[0x4200] & 0x10)
-		printf("H-IRQ enabled at %d, \n", PPU.IRQHBeamPos);
-
-	if (Memory.FillRAM[0x4200] & 0x80)
-		printf("V-blank NMI enabled, \n");
-
-	for (int i = 0; i < 8; i++)
-	{
-		if (missing.hdma_this_frame & (1 << i))
-		{
-			printf("H-DMA %d [%d] 0x%02X%04X->0x21%02X %s %s 0x%02X%04X %s addressing, \n",
-			       i, DMA[i].TransferMode, DMA[i].ABank, DMA[i].AAddress, DMA[i].BAddress,
-			       DMA[i].AAddressDecrement ? "dec" : "inc",
-			       DMA[i].Repeat ? "repeat" : "continue",
-			       DMA[i].IndirectBank, DMA[i].IndirectAddress,
-			       DMA[i].HDMAIndirectAddressing ? "indirect" : "absolute");
-		}
-	}
-
-	for (int i = 0; i < 8; i++)
-	{
-		if (missing.dma_this_frame & (1 << i))
-		{
-			printf("DMA %d [%d] 0x%02X%04X->0x21%02X Num: %d %s, \n",
-			       i, DMA[i].TransferMode, DMA[i].ABank, DMA[i].AAddress, DMA[i].BAddress, DMA[i].TransferBytes,
-			       DMA[i].AAddressFixed ? "fixed" : (DMA[i].AAddressDecrement ? "dec" : "inc"));
-		}
-	}
-
-	printf("VRAM write address: 0x%04x(%s), Full Graphic: %d, Address inc: %d, \n",
-	       PPU.VMA.Address,
-	       PPU.VMA.High  ? "Byte" : "Word",
-	       PPU.VMA.FullGraphicCount, PPU.VMA.Increment);
-
-	for (int i = 0; i < 4; i++)
-	{
-		printf("BG%d: VOffset:%d, HOffset:%d, W:%d, H:%d, TS:%d, BA:0x%04x, TA:0x%04X, \n",
-		       i, PPU.BG[i].VOffset, PPU.BG[i].HOffset,
-		       (PPU.BG[i].SCSize & 1) * 32 + 32,
-		       (PPU.BG[i].SCSize & 2) * 16 + 32,
-		       PPU.BG[i].BGSize * 8 + 8,
-		       PPU.BG[i].SCBase,
-		       PPU.BG[i].NameBase);
-	}
-
-	const char	*s = "";
-
-	switch ((Memory.FillRAM[0x2130] & 0xc0) >> 6)
-	{
-		case 0:
-			s = "always on";
-			break;
-
-		case 1:
-			s = "inside";
-			break;
-
-		case 2:
-			s = "outside";
-			break;
-
-		case 3:
-			s = "always off";
-			break;
-	}
-
-	printf("Main screen (%s): ", s);
-
-	for (int i = 0; i < 5; i++)
-	{
-		if (Memory.FillRAM[0x212c] & (1 << i))
-		{
-			switch (i)
-			{
-				case 0:
-					printf("BG0, ");
-					break;
-
-				case 1:
-					printf("BG1, ");
-					break;
-
-				case 2:
-					printf("BG2, ");
-					break;
-
-				case 3:
-					printf("BG3, ");
-					break;
-
-				case 4:
-					printf("OBJ, ");
-					break;
-			}
-		}
-	}
-
-	printf("\n");
-
-	switch ((Memory.FillRAM[0x2130] & 0x30) >> 4)
-	{
-		case 0:
-			s = "always on";
-			break;
-
-		case 1:
-			s = "inside";
-			break;
-
-		case 2:
-			s = "outside";
-			break;
-
-		case 3:
-			s = "always off";
-			break;
-	}
-
-	printf("Subscreen (%s): ", s);
-
-	for (int i = 0; i < 5; i++)
-	{
-		if (Memory.FillRAM[0x212d] & (1 << i))
-		{
-			switch (i)
-			{
-				case 0:
-					printf("BG0, ");
-					break;
-
-				case 1:
-					printf("BG1, ");
-					break;
-
-				case 2:
-					printf("BG2, ");
-					break;
-
-				case 3:
-					printf("BG3, ");
-					break;
-
-				case 4:
-					printf("OBJ, ");
-					break;
-			}
-		}
-	}
-
-	printf("\n");
-
-	if ((Memory.FillRAM[0x2131] & 0x3f))
-	{
-		if (Memory.FillRAM[0x2131] & 0x80)
-		{
-			if (Memory.FillRAM[0x2130] & 0x02)
-				printf("Subscreen subtract");
-			else
-				printf("Fixed colour subtract");
-		}
-		else
-		{
-			if (Memory.FillRAM[0x2130] & 0x02)
-				printf("Subscreen addition");
-			else
-				printf("Fixed colour addition");
-		}
-
-		if (Memory.FillRAM[0x2131] & 0x40)
-			printf("(half): ");
-		else
-			printf(": ");
-
-		for (int i = 0; i < 6; i++)
-		{
-			if (Memory.FillRAM[0x2131] & (1 << i))
-			{
-				switch (i)
-				{
-					case 0:
-						printf("BG0, ");
-						break;
-
-					case 1:
-						printf("BG1, ");
-						break;
-
-					case 2:
-						printf("BG2, ");
-						break;
-
-					case 3:
-						printf("BG3, ");
-						break;
-
-					case 4:
-						printf("OBJ, ");
-						break;
-
-					case 5:
-						printf("BACK, ");
-						break;
-				}
-			}
-		}
-
-		printf("\n");
-	}
-
-	printf("Window 1 (%d, %d, %02x, %02x): ", PPU.Window1Left, PPU.Window1Right, Memory.FillRAM[0x212e], Memory.FillRAM[0x212f]);
-
-	for (int i = 0; i < 6; i++)
-	{
-		if (PPU.ClipWindow1Enable[i])
-		{
-			switch (i)
-			{
-				case 0:
-					printf("BG0(%s-%s), ", PPU.ClipWindow1Inside[0] ? "I" : "O", debug_clip_fn(PPU.ClipWindowOverlapLogic[0]));
-					break;
-
-				case 1:
-					printf("BG1(%s-%s), ", PPU.ClipWindow1Inside[1] ? "I" : "O", debug_clip_fn(PPU.ClipWindowOverlapLogic[1]));
-					break;
-
-				case 2:
-					printf("BG2(%s-%s), ", PPU.ClipWindow1Inside[2] ? "I" : "O", debug_clip_fn(PPU.ClipWindowOverlapLogic[2]));
-					break;
-
-				case 3:
-					printf("BG3(%s-%s), ", PPU.ClipWindow1Inside[3] ? "I" : "O", debug_clip_fn(PPU.ClipWindowOverlapLogic[3]));
-					break;
-
-				case 4:
-					printf("OBJ(%s-%s), ", PPU.ClipWindow1Inside[4] ? "I" : "O", debug_clip_fn(PPU.ClipWindowOverlapLogic[4]));
-					break;
-
-				case 5:
-					printf("COL(%s-%s), ", PPU.ClipWindow1Inside[5] ? "I" : "O", debug_clip_fn(PPU.ClipWindowOverlapLogic[5]));
-					break;
-			}
-		}
-	}
-
-	printf("\n");
-
-	printf("Window 2 (%d, %d): ", PPU.Window2Left, PPU.Window2Right);
-
-	for (int i = 0; i < 6; i++)
-	{
-		if (PPU.ClipWindow2Enable[i])
-		{
-			switch (i)
-			{
-				case 0:
-					printf("BG0(%s), ", PPU.ClipWindow2Inside[0] ? "I" : "O");
-					break;
-
-				case 1:
-					printf("BG1(%s), ", PPU.ClipWindow2Inside[1] ? "I" : "O");
-					break;
-
-				case 2:
-					printf("BG2(%s), ", PPU.ClipWindow2Inside[2] ? "I" : "O");
-					break;
-
-				case 3:
-					printf("BG3(%s), ", PPU.ClipWindow2Inside[3] ? "I" : "O");
-					break;
-
-				case 4:
-					printf("OBJ(%s), ", PPU.ClipWindow2Inside[4] ? "I" : "O");
-					break;
-
-				case 5:
-					printf("COL(%s), " , PPU.ClipWindow2Inside[5] ? "I" : "O");
-					break;
-			}
-		}
-	}
-
-	printf("\n");
-
-	printf("Fixed colour: %02x%02x%02x, \n", PPU.FixedColourRed, PPU.FixedColourGreen, PPU.FixedColourBlue);
-}
-
-static void debug_whats_missing (void)
-{
-	printf("Processor: ");
-
-	if (missing.emulate6502)
-		printf("emulation mode, ");
-
-	if (missing.decimal_mode)
-		printf("decimal mode, ");
-
-	if (missing.mv_8bit_index)
-		printf("MVP/MVN with 8bit index registers and XH or YH > 0, ");
-
-	if (missing.mv_8bit_acc)
-		printf("MVP/MVN with 8bit accumulator > 255, ");
-
-	printf("\n");
-
-	printf("Screen modes used: ");
-
-	for (int i = 0; i < 8; i++)
-		if (missing.modes[i])
-			printf("%d, ", i);
-
-	printf("\n");
-
-	if (missing.interlace)
-		printf("Interlace, ");
-
-	if (missing.pseudo_512)
-		printf("Pseudo 512 pixels horizontal resolution, ");
-
-	if (missing.lines_239)
-		printf("240 lines visible, ");
-
-	if (missing.sprite_double_height)
-		printf("double-hight sprites, ");
-
-	printf("\n");
-
-	if (missing.mode7_fx)
-		printf("Mode 7 rotation/scaling, ");
-
-	if (missing.matrix_read)
-		printf("Mode 7 read matrix registers, ");
-
-	if (missing.mode7_flip)
-		printf("Mode 7 flipping, ");
-
-	if (missing.mode7_bgmode)
-		printf("Mode 7 priority per pixel, ");
-
-	if (missing.direct)
-		printf("Direct 32000 colour mode, ");
-
-	printf("\n");
-
-	if (missing.mosaic)
-		printf("Mosaic effect, ");
-
-	if (missing.subscreen)
-		printf("Subscreen enabled, ");
-
-	if (missing.subscreen_add)
-		printf("Subscreen colour add, ");
-
-	if (missing.subscreen_sub)
-		printf("Subscreen colour subtract, ");
-
-	if (missing.fixed_colour_add)
-		printf("Fixed colour add, ");
-
-	if (missing.fixed_colour_sub)
-		printf("Fixed colour subtract, ");
-
-	printf("\n");
-
-	printf("Window 1 enabled on: ");
-	debug_print_window(missing.window1);
-
-	printf("\n");
-	
-	printf("Window 2 enabled on: ");
-	debug_print_window(missing.window2);
-
-	printf("\n");
-
-	if (missing.bg_offset_read)
-		printf("BG offset read, ");
-
-	if (missing.oam_address_read)
-		printf("OAM address read, ");
-
-	if (missing.sprite_priority_rotation)
-		printf("Sprite priority rotation, ");
-
-	if (missing.fast_rom)
-		printf("Fast 3.58MHz ROM access enabled, ");
-
-	if (missing.matrix_multiply)
-		printf("Matrix multiply 16bit by 8bit used, ");
-
-	printf("\n");
-
-	if (missing.virq)
-		printf("V-IRQ used at line %d, ", missing.virq_pos);
-
-	if (missing.hirq)
-		printf("H-IRQ used at position %d, ", missing.hirq_pos);
-
-	printf("\n");
-
-	if (missing.h_v_latch)
-		printf("H and V-Pos latched, ");
-
-	if (missing.h_counter_read)
-		printf("H-Pos read, ");
-
-	if (missing.v_counter_read)
-		printf("V-Pos read, ");
-
-	printf("\n");
-
-	if (missing.oam_read)
-		printf("OAM read, ");
-
-	if (missing.vram_read)
-		printf("VRAM read, ");
-
-	if (missing.cgram_read)
-		printf("CG-RAM read, ");
-
-	if (missing.wram_read)
-		printf("WRAM read, ");
-
-	if (missing.dma_read)
-		printf("DMA read, ");
-
-	if (missing.vram_inc)
-		printf("VRAM inc: %d, ", missing.vram_inc);
-
-	if (missing.vram_full_graphic_inc)
-		printf("VRAM full graphic inc: %d, ", missing.vram_full_graphic_inc);
-
-	printf("\n");
-
-	for (int i = 0; i < 8; i++)
-	{
-		if (missing.hdma[i].used)
-		{
-			printf("HDMA %d 0x%02X%04X->0x21%02X %s, ",
-			       i, missing.hdma[i].abus_bank, missing.hdma[i].abus_address, missing.hdma[i].bbus_address,
-			       missing.hdma[i].indirect_address ? "indirect" : "absolute");
-
-			if (missing.hdma[i].force_table_address_write)
-				printf("Forced address write, ");
-
-			if (missing.hdma[i].force_table_address_read)
-				printf("Current address read, ");
-
-			if (missing.hdma[i].line_count_write)
-				printf("Line count write, ");
-
-			if (missing.hdma[i].line_count_read)
-				printf("Line count read, ");
-
-			printf("\n");
-		}
-	}
-
-	for (int i = 0; i < 8; i++)
-	{
-		if (missing.dma_channels & (1 << i))
-		{
-			printf("DMA %d [%d] 0x%02X%04X->0x21%02X Num: %d %s, \n",
-			       i, DMA[i].TransferMode, DMA[i].ABank, DMA[i].AAddress, DMA[i].BAddress, DMA[i].TransferBytes,
-			       DMA[i].AAddressFixed ? "fixed" : (DMA[i].AAddressDecrement ? "dec" : "inc"));
-		}
-	}
-
-	if (missing.unknownppu_read)
-		printf("Read from unknown PPU register: $%04X, \n", missing.unknownppu_read);
-
-	if (missing.unknownppu_write)
-		printf("Write to unknown PPU register: $%04X, \n", missing.unknownppu_write);
-
-	if (missing.unknowncpu_read)
-		printf("Read from unknown CPU register: $%04X, \n", missing.unknowncpu_read);
-
-	if (missing.unknowncpu_write)
-		printf("Write to unknown CPU register: $%04X, \n", missing.unknowncpu_write);
-
-	if (missing.unknowndsp_read)
-		printf("Read from unknown DSP register: $%04X, \n", missing.unknowndsp_read);
-
-	if (missing.unknowndsp_write)
-		printf("Write to unknown DSP register: $%04X, \n", missing.unknowndsp_write);
-}
-
-void S9xDoDebug (void)
-{
-	static char	Line[513] = {'\0'};
-	char		Line_in[513];
-
-	Debug.Dump.Bank = 0;
-	Debug.Dump.Address = 0;
-	Debug.Unassemble.Bank = 0;
-	Debug.Unassemble.Address = 0;
-	S9xBreakpoint[5].Enabled = FALSE;
-
-	S9xTextMode();
-
-	debug_process_command("status");
-
-	while (CPU.Flags & DEBUG_MODE_FLAG)
-	{
-		int32	Cycles;
-		char	*p;
-
-		printf("> ");
-		fflush(stdout);
-
-		p = fgets(Line_in, sizeof(Line_in) - 1, stdin);
-		if (p == NULL || Line_in[0] == '\0') {
-			printf("\nAre you sure you want to quit? [y/n] ");
-			p = fgets(Line_in, sizeof(Line_in) - 1, stdin);
-			if (p == NULL || Line_in[0] == '\0' || Line_in[0] == '\n' || Line_in[0] == 'Y' || Line_in[0] == 'y') {
-				if (p == NULL || Line_in[0] == '\0') printf("\n");
-				S9xExit();
-			}
-			continue;
-		} else if (Line_in[0] != '\n') {
-			Line_in[strlen(Line_in) - 1] = 0;
-			memset(Line, '\0', sizeof(Line));
-			strcpy(Line, Line_in);
-		}
-
-		Cycles = CPU.Cycles;
-		debug_process_command(Line);
-		CPU.Cycles = Cycles;
-	}
-
-	if (!(CPU.Flags & SINGLE_STEP_FLAG))
-		S9xGraphicsMode();
 }
 
 void S9xTrace (void)

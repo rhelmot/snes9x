@@ -488,7 +488,7 @@ void S9xLoadConfigFiles (char **argv, int argc)
 
 #ifdef DEBUGGER
 	if (conf.GetBool("DEBUG::Debugger", false))
-		CPU.Flags |= DEBUG_MODE_FLAG;
+		S9xStartDebug();
 
 	if (conf.GetBool("DEBUG::Trace", false))
 	{
@@ -836,7 +836,7 @@ char * S9xParseArgs (char **argv, int argc)
 		
 		#ifdef DEBUGGER
 			if (!strcasecmp(argv[i], "-debug"))
-				CPU.Flags |= DEBUG_MODE_FLAG;
+				S9xStartDebug();
 			else
 			if (!strcasecmp(argv[i], "-trace"))
 			{

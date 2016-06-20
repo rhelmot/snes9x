@@ -252,6 +252,8 @@ extern	std::vector<strpair_t>				keymaps;
 
 typedef	void (* Blitter) (uint8 *, int, uint8 *, int, int, int);
 
+Atom wmDeleteMessage;
+
 #ifdef __linux
 // Select seems to be broken in 2.x.x kernels - if a signal interrupts a
 // select system call with a zero timeout, the select call is restarted but
@@ -630,6 +632,9 @@ void S9xInitDisplay (int argc, char **argv)
 			GUI.bytes_per_pixel = 2;
 			break;
 	}
+
+	wmDeleteMessage = XInternAtom(GUI.display, "WM_DELETE_WINDOW", false);
+	XSetWMProtocols(GUI.display, GUI.window, &wmDeleteMessage, 1);
 }
 
 void S9xDeinitDisplay (void)
@@ -1072,6 +1077,12 @@ void S9xProcessEvents (bool8 block)
 
 			case Expose:
 				Repaint(FALSE);
+				break;
+
+			case ClientMessage:
+				if (event.xclient.data.l[0] == wmDeleteMessage) {
+					S9xExit();
+				}
 				break;
 		}
 	}

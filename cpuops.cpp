@@ -3474,7 +3474,10 @@ static void OpCB (void)
 static void OpDB (void)
 {
 	Registers.PCw--;
-	CPU.Flags |= DEBUG_MODE_FLAG | HALTED_FLAG;
+#ifdef DEBUGGER
+	S9xStartDebug();
+#endif
+	CPU.Flags |= HALTED_FLAG;
 }
 
 /* WDM (Reserved S9xOpcode) ************************************************ */
@@ -3497,7 +3500,7 @@ static void Op42 (void)
 	switch (byte)
 	{
 		case 0xdb: // "STP" = Enter debug mode
-			CPU.Flags |= DEBUG_MODE_FLAG;
+			S9xStartDebug();
 			break;
 
 	#ifndef SA1_OPCODES

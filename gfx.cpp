@@ -453,7 +453,7 @@ void S9xEndScreenRefresh (void)
 		else
 		{
 			CPU.Flags &= ~FRAME_ADVANCE_FLAG;
-			CPU.Flags |= DEBUG_MODE_FLAG;
+			S9xStartDebug();
 		}
 	}
 #endif

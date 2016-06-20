@@ -347,6 +347,10 @@ static void * S9xProcessSound (void *);
 static void InitJoysticks (void);
 static void ReadJoysticks (void);
 #endif
+#ifdef DEBUGGER
+void debug_setup();
+void debug_teardown();
+#endif
 
 
 void _splitpath (const char *path, char *drive, char *dir, char *fname, char *ext)
@@ -1671,6 +1675,9 @@ void S9xExit (void)
 	if (Settings.NetPlay)
 		S9xNPDisconnect();
 #endif
+#ifdef DEBUGGER
+	debug_teardown();
+#endif
 
 	Memory.SaveSRAM(S9xGetFilename(".srm", SRAM_DIR));
 	S9xSaveCheatFile(S9xGetFilename(".cht", CHEAT_DIR));
@@ -1698,7 +1705,8 @@ void S9xExit (void)
 #ifdef DEBUGGER
 static void sigbrkhandler (int)
 {
-	CPU.Flags |= DEBUG_MODE_FLAG;
+	S9xStartDebug();
+	printf("\n");
 	signal(SIGINT, (SIG_PF) sigbrkhandler);
 }
 #endif
@@ -1759,11 +1767,7 @@ int main (int argc, char **argv)
 
 	rewinding = false;
 
-#ifdef DEBUGGER
-	CPU.Flags = DEBUG_MODE_FLAG;
-#else
 	CPU.Flags = 0;
-#endif
 
 	S9xLoadConfigFiles(argv, argc);
 	rom_filename = S9xParseArgs(argv, argc);
@@ -1862,6 +1866,7 @@ int main (int argc, char **argv)
 	Settings.StopEmulation = FALSE;
 
 #ifdef DEBUGGER
+	debug_setup();
 	struct sigaction sa;
 	sa.sa_handler = sigbrkhandler;
 #ifdef SA_RESTART
@@ -2023,7 +2028,7 @@ int main (int argc, char **argv)
 
 	#ifdef DEBUGGER
 		if (CPU.Flags & DEBUG_MODE_FLAG)
-			S9xDoDebug();
+			S9xDebugInteract();
 		else
 	#endif
 		if (Settings.Paused)

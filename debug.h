@@ -182,6 +182,7 @@
 #define _DEBUG_H_
 
 #include <string>
+#include "snes9x.h"
 
 struct SBreakPoint
 {
@@ -194,6 +195,21 @@ struct SWatchPoint
 	uint8	Mode;
 	uint32	Address;
 	uint8 *	RealAddress;
+};
+
+struct SDebug
+{
+	struct
+	{
+		uint8	Bank;
+		uint16	Address;
+	}	Dump;
+
+	struct
+	{
+		uint8	Bank;
+		uint16	Address;
+	}	Unassemble;
 };
 
 #define ENSURE_TRACE_OPEN(fp, file, mode) \
@@ -209,10 +225,32 @@ struct SWatchPoint
 #define WATCH_MODE_WRITE 2
 #define WATCH_MODE_BOTH  3
 
-extern struct SBreakPoint	S9xBreakpoint[6];
-extern struct SWatchPoint	S9xWatchpoint[6];
+static struct SBreakPoint	S9xBreakpoint[6];
+static struct SWatchPoint	S9xWatchpoint[6];
+static struct SDebug	Debug = { { 0, 0 },{ 0, 0 } };
 
-void S9xDoDebug (void);
+void S9xDebugPrintWhatsUsed (std::ostream &out);
+void S9xDebugPrintWhatsMissing(std::ostream &out);
+void S9xDebugPrintStatus(std::ostream &out);
+void S9xDebugPrintVectors(std::ostream &out);
+void S9xDebugPrintColors(std::ostream &out, bool rgb_mode);
+void S9xDebugPrintSprites(std::ostream &out);
+void S9xDebugPrintWindow(std::ostream &out);
+void S9xDebugPrintBreakpoints(std::ostream &out);
+void S9xDebugPrintWatchpoints(std::ostream &out);
+
+int S9xSetBreakpoint(uint32 addr);
+int  S9xSetWatchpoint(uint32 addr, uint8 type);
+bool S9xRemoveBreakpoint(int i);
+bool S9xRemoveWatchpoint(int i);
+void S9xDebugStepOver();
+void S9xDebugStepInto();
+void S9xDebugContinue();
+
+void S9xStartDebug (void);
+void S9xStopDebug (void);
+void S9xDebugInteract (void);
+void S9xDebugCommand (const char *, std::ostream &);
 void S9xTrace (void);
 void S9xSA1Trace (void);
 void S9xTraceMessage (const char *);

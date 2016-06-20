@@ -238,7 +238,7 @@ void S9xMainLoop (void)
 				for (int Break = 0; Break != 6; Break++) {
 					if (S9xBreakpoint[Break].Enabled &&
 						S9xBreakpoint[Break].Address == ((uint32) Registers.PCw | ((uint32) Registers.PB << 16))) {
-						CPU.Flags |= DEBUG_MODE_FLAG;
+						S9xStartDebug();
 						break;
 					}
 				}
@@ -256,7 +256,7 @@ void S9xMainLoop (void)
 		if (CPU.Flags & SINGLE_STEP_FLAG)
 		{
 			CPU.Flags &= ~SINGLE_STEP_FLAG;
-			CPU.Flags |= DEBUG_MODE_FLAG;
+			S9xStartDebug();
 		}
 	#endif
 

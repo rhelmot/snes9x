@@ -2228,7 +2228,7 @@ void S9xApplyCommand (s9xcommand_t cmd, int16 data1, int16 data2)
 
 					case Debugger:
 					#ifdef DEBUGGER
-						CPU.Flags |= DEBUG_MODE_FLAG;
+						S9xStartDebug();
 					#endif
 						break;
 
