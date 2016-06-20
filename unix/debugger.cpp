@@ -18,6 +18,11 @@ void debug_setup() {
 	} else {
 		read_history(filename);
 	}
+
+	CPU.Flags = DEBUG_MODE_FLAG;
+	printf("\nWelcome to the Snes9x Debugger!\n"
+			"Press '?' for help, or 'c' to begin execution.\n"
+			"Return to this prompt at any time with ctrl-c\n\n");
 }
 
 void debug_teardown() {

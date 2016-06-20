@@ -1716,7 +1716,7 @@ int main (int argc, char **argv)
 	if (argc < 2)
 		S9xUsage();
 
-	printf("\n\nSnes9x " VERSION " for unix\n");
+	printf("Snes9x " VERSION " for unix\n");
 
 	snprintf(default_dir, PATH_MAX + 1, "%s%s%s", getenv("HOME"), SLASH_STR, ".snes9x");
 	s9x_base_dir = default_dir;
@@ -1866,7 +1866,6 @@ int main (int argc, char **argv)
 	Settings.StopEmulation = FALSE;
 
 #ifdef DEBUGGER
-	debug_setup();
 	struct sigaction sa;
 	sa.sa_handler = sigbrkhandler;
 #ifdef SA_RESTART
@@ -1961,6 +1960,10 @@ int main (int argc, char **argv)
 
 #ifdef NETPLAY_SUPPORT
 	bool8	NP_Activated = Settings.NetPlay;
+#endif
+
+#ifdef DEBUGGER
+	debug_setup();
 #endif
 
 	while (1)
