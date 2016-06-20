@@ -223,8 +223,6 @@ static const char	*HelpMessage[] =
 
 	"z                         - ???? Dumps some sort of VRAM data, I don't know what this does",
 	"f                         - ???? Some sort of attempt to step some number of frames forward?",
-	"d                         - ???? What the actual heck does this do",
-	"u                         - ???? Disassemble (Unassemble) some bytes",
 	"",
 	NULL
 };
@@ -399,6 +397,26 @@ uint16 S9xDebugSA1GetWord (uint32 Address)
 	word |= S9xDebugSA1GetByte(Address + 1) << 8;
 
 	return (word);
+}
+
+static void debug_cpu_status_print (char *Line) {
+	debug_cpu_op_print(Line, Registers.PB, Registers.PCw);
+	sprintf(Line, "%-44s A:%04X X:%04X Y:%04X D:%04X DB:%02X S:%04X P:%c%c%c%c%c%c%c%c%c HC:%04ld VC:%03ld FC:%02d %03x",
+	        Line, Registers.A.W, Registers.X.W, Registers.Y.W,
+	        Registers.D.W, Registers.DB, Registers.S.W,
+	        CheckEmulation() ? 'E' : 'e',
+	        CheckNegative() ? 'N' : 'n',
+	        CheckOverflow() ? 'V' : 'v',
+	        CheckMemory() ? 'M' : 'm',
+	        CheckIndex() ? 'X' : 'x',
+	        CheckDecimal() ? 'D' : 'd',
+	        CheckIRQ() ? 'I' : 'i',
+	        CheckZero() ? 'Z' : 'z',
+	        CheckCarry() ? 'C' : 'c',
+	        (long) CPU.Cycles,
+	        (long) CPU.V_Counter,
+	        IPPU.FrameCount,
+	        (CPU.IRQExternal ? 0x100 : 0) | (PPU.HTimerEnabled ? 0x10 : 0) | (PPU.VTimerEnabled ? 0x01 : 0));
 }
 
 static uint8 debug_cpu_op_print (char *Line, uint8 Bank, uint16 Address)
@@ -838,23 +856,6 @@ static uint8 debug_cpu_op_print (char *Line, uint8 Bank, uint16 Address)
 			Size = 2;
 			break;
 	}
-
-	sprintf(Line, "%-44s A:%04X X:%04X Y:%04X D:%04X DB:%02X S:%04X P:%c%c%c%c%c%c%c%c%c HC:%04ld VC:%03ld FC:%02d %03x",
-	        Line, Registers.A.W, Registers.X.W, Registers.Y.W,
-	        Registers.D.W, Registers.DB, Registers.S.W,
-	        CheckEmulation() ? 'E' : 'e',
-	        CheckNegative() ? 'N' : 'n',
-	        CheckOverflow() ? 'V' : 'v',
-	        CheckMemory() ? 'M' : 'm',
-	        CheckIndex() ? 'X' : 'x',
-	        CheckDecimal() ? 'D' : 'd',
-	        CheckIRQ() ? 'I' : 'i',
-	        CheckZero() ? 'Z' : 'z',
-	        CheckCarry() ? 'C' : 'c',
-	        (long) CPU.Cycles,
-	        (long) CPU.V_Counter,
-	        IPPU.FrameCount,
-	        (CPU.IRQExternal ? 0x100 : 0) | (PPU.HTimerEnabled ? 0x10 : 0) | (PPU.VTimerEnabled ? 0x01 : 0));
 
 	return (Size);
 }
@@ -1988,7 +1989,7 @@ void S9xDebugPrintWhatsMissing(std::ostream &out)
 
 void S9xDebugPrintStatus(std::ostream &out) {
 	char	string[512];
-	debug_cpu_op_print(string, Registers.PB, Registers.PCw);
+	debug_cpu_status_print(string);
 	out << string << '\n';
 }
 
@@ -2258,7 +2259,7 @@ void S9xDebugContinue() {
 	S9xStopDebug();
 }
 
-void S9xDebugCommand (const char *Line, std::ostream &out)
+void S9xDebugCommand (const char *Line, std::ostream &out, bool is_redo)
 {
 	uint8	Bank = Registers.PB;
 	uint32	Address = Registers.PCw;
@@ -2297,96 +2298,114 @@ void S9xDebugCommand (const char *Line, std::ostream &out)
 
 	else if (Line[0] == 'x') { // eXamine memory
 		const char *p;
-		uint32 count = 0;
-		uint8 wordsize = 1;
-		uint8 format = 1;	// {Dec, Hex}
-		uint32 address = 0;
-		if (Line[1] == '/') {
-			// Parse count
-			for (p = &Line[2]; *p >= '0' && *p <= '9'; p++) {
-				count *= 10;
-				count += *p - '0';
-			}
+		static uint32 count = 0;
+		static uint8 wordsize = 1;
+		static uint8 format = 1;	// {Dec, Hex, Insn}
+		static uint32 address = 0;
 
-			// Parse wordsize
-			if (*p == 'b') {
-				wordsize = 1;
-				p++;
-			} else if (*p == 'c') {
-				wordsize = 1;
-				p++;
-			} else if (*p == 'w') {
-				wordsize = 2;
-				p++;
-			} else if (*p == 'h') {
-				wordsize = 2;
-				p++;
-			} else if (*p == 'p') {
-				wordsize = 3;
-				p++;
-			}
+		if (!is_redo) {
+			if (Line[1] == '/') {
+				count = 0;
+				// Parse count
+				for (p = &Line[2]; *p >= '0' && *p <= '9'; p++) {
+					count *= 10;
+					count += *p - '0';
+				}
 
-			// Parse format
-			if (*p == 'd') {
-				format = 0;
-				p++;
-			} else if (*p == 'x') {
-				format = 1;
-				p++;
-			}
-		} else {
-			p = &Line[1];
-		}
+				// Parse wordsize
+				if (*p == 'b') {
+					wordsize = 1;
+					p++;
+				} else if (*p == 'c') {
+					wordsize = 1;
+					p++;
+				} else if (*p == 'w') {
+					wordsize = 2;
+					p++;
+				} else if (*p == 'h') {
+					wordsize = 2;
+					p++;
+				} else if (*p == 'p') {
+					wordsize = 3;
+					p++;
+				}
 
-		if (count == 0)
-			count = 1;
-
-		// Parse address
-		if (p[0] != ' ' || p[1] != '$' || !((p[2] >= '0' && p[2] <= '9') || (p[2] >= 'A' && p[2] <= 'Z') || (p[2] >= 'a' && p[2] <= 'z'))) {
-			out << "Bad examine command.\nFormat: x/{count}{wordsize}{format} ${addr}\n";
-			return;
-		}
-		p += 2;
-
-		for (; *p != '\0'; p++) {
-			if (*p >= '0' && *p <= '9') {
-				address *= 16;
-				address += *p - '0';
-			} else if (*p >= 'A' && *p <= 'Z') {
-				address *= 16;
-				address += *p - 'A' + 10;
-			} else if (*p >= 'a' && *p <= 'z') {
-				address *= 16;
-				address += *p - 'a' + 10;
+				// Parse format
+				if (*p == 'd') {
+					format = 0;
+					p++;
+				} else if (*p == 'x') {
+					format = 1;
+					p++;
+				} else if (*p == 'i') {
+					format = 2;
+					p++;
+				}
 			} else {
-				out << "Bad examine command.\nFormat: x/{count}{wordsize}{format} ${addr}\n";
-				return;
+				p = &Line[1];
+			}
+
+			if (count == 0)
+				count = 1;
+
+			if (p[0] != '\0') {
+				// Parse address
+				if (p[0] != ' ' || p[1] != '$' || !((p[2] >= '0' && p[2] <= '9') || (p[2] >= 'A' && p[2] <= 'Z') || (p[2] >= 'a' && p[2] <= 'z'))) {
+					out << "Bad examine command.\nFormat: x/{count}{wordsize}{format} ${addr}\nWordsize can be one of 'bwp' (byte, word, pointer), and format can be one of 'dxi' (decimal, hex, instruction)\n";
+					return;
+				}
+				p += 2;
+
+				address = 0;
+				for (; *p != '\0'; p++) {
+					if (*p >= '0' && *p <= '9') {
+						address *= 16;
+						address += *p - '0';
+					} else if (*p >= 'A' && *p <= 'Z') {
+						address *= 16;
+						address += *p - 'A' + 10;
+					} else if (*p >= 'a' && *p <= 'z') {
+						address *= 16;
+						address += *p - 'a' + 10;
+					} else if (*p == ':' || *p == ' ' || *p == 'x') {
+					  continue;
+					} else {
+					out << "Bad examine command.\nFormat: x/{count}{wordsize}{format} ${addr}\nWordsize can be one of 'bwp' (byte, word, pointer), and format can be one of 'dxi' (decimal, hex, instruction)\n";
+						return;
+					}
+				}
 			}
 		}
 
 		// Do it!
 		int perline = (wordsize == 1 ? 16 : (wordsize == 2 ? 8 : 4));
 		for (int i = 0; i < count; i++) {
-			if (i % perline == 0) {
-				sprintf(string, "\n$%06x:  ", address);
+			if (format == 2) {
+				address += debug_cpu_op_print(string, address >> 16, address & 0xFFFF);
+				out << string << '\n';
+			} else {
+				if (i % perline == 0) {
+					if (i != 0) out << '\n';
+					sprintf(string, "$%02X:%04X", address >> 16, address & 0xFFFF);
+					out << string;
+				}
+				uint32 value = 0;
+				for (int j = 0; j < wordsize; j++) {
+					value |= S9xDebugGetByte(address) << (j * 8);
+					address += 1;
+				}
+
+				sprintf(string, wordsize == 1 ? 
+					(format == 0 ? " %3d" : " %02X")
+						:
+					(wordsize == 2 ? 
+					(format == 0 ? " %5d" : " %04X")
+					    :
+					(format == 0 ? " %7d" : " %06X")), value);
 				out << string;
 			}
-			uint32 value = 0;
-			for (int j = 0; j < wordsize; j++) {
-				value |= S9xDebugGetByte(address) << (j * 8);
-				address += 1;
-			}
-
-			sprintf(string, wordsize == 1 ? 
-				(format == 0 ? " %3d" : " %02x")
-					:
-				(wordsize == 2 ? 
-				(format == 0 ? " %5d" : " %04x")
-				    :
-				(format == 0 ? " %7d" : " %06x")), value);
-			out << string;
 		}
-		out << '\n';
+		if (format != 2) out << '\n';
 	}
 
 	else if (strncasecmp(Line, "dump", 4) == 0)
@@ -2590,87 +2609,6 @@ void S9xDebugCommand (const char *Line, std::ostream &out)
 		S9xDebugContinue();
 	}
 
-	else if (*Line == 'd')
-	{
-		int		CLine;
-		int		CByte;
-		uint8	MemoryByte;
-
-		if (Debug.Dump.Bank != 0 || Debug.Dump.Address != 0)
-		{
-			Bank = Debug.Dump.Bank;
-			Address = Debug.Dump.Address;
-		}
-
-		debug_get_start_address(Line, &Bank, &Address);
-
-		for (CLine = 0; CLine != 10; CLine++)
-		{
-			sprintf(string, "$%02X:%04X", Bank, Address);
-
-			for (CByte = 0; CByte != 16; CByte++)
-			{
-				if (Address + CByte == 0x2140 ||
-				    Address + CByte == 0x2141 ||
-				    Address + CByte == 0x2142 ||
-				    Address + CByte == 0x2143 ||
-				    Address + CByte == 0x4210)
-					MemoryByte = 0;
-				else
-					MemoryByte = S9xDebugGetByte((Bank << 16) + Address + CByte);
-
-				sprintf(string, "%s %02X", string, MemoryByte);
-			}
-
-			sprintf(string, "%s-", string);
-
-			for (CByte = 0; CByte != 16; CByte++)
-			{
-				if (Address + CByte == 0x2140 ||
-				    Address + CByte == 0x2141 ||
-				    Address + CByte == 0x2142 ||
-				    Address + CByte == 0x2143 ||
-				    Address + CByte == 0x4210)
-					MemoryByte = 0;
-				else
-					MemoryByte = S9xDebugGetByte((Bank << 16) + Address + CByte);
-
-				if (MemoryByte < 32 || MemoryByte >= 127)
-					MemoryByte = '?';
-
-				sprintf(string, "%s%c", string, MemoryByte);
-			}
-
-			Address += 16;
-
-			out << string << '\n';
-		}
-
-		Debug.Dump.Bank = Bank;
-		Debug.Dump.Address = Address;
-	}
-
-
-	else if (*Line == 'u')
-	{
-		if (Debug.Unassemble.Bank != 0 || Debug.Unassemble.Address != 0)
-		{
-			Bank = Debug.Unassemble.Bank;
-			Address = Debug.Unassemble.Address;
-		}
-
-		debug_get_start_address(Line, &Bank, &Address);
-
-		for (int i = 0; i != 10; i++)
-		{
-			Address += debug_cpu_op_print(string, Bank, Address);
-			out << string << '\n';
-		}
-
-		Debug.Unassemble.Bank = Bank;
-		Debug.Unassemble.Address = Address;
-	}
-
 	else {
 		out << "Invalid command.\n";
 	}
@@ -2684,7 +2622,7 @@ void S9xTrace (void)
 
 	ENSURE_TRACE_OPEN(trace, "trace.log", "a")
 
-	debug_cpu_op_print(msg, Registers.PB, Registers.PCw);
+	debug_cpu_status_print(msg);
 	fprintf(trace, "%s\n", msg);
 }
 

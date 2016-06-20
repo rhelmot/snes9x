@@ -250,7 +250,7 @@ void S9xDebugContinue();
 void S9xStartDebug (void);
 void S9xStopDebug (void);
 void S9xDebugInteract (void);
-void S9xDebugCommand (const char *, std::ostream &);
+void S9xDebugCommand (const char *, std::ostream &, bool=false);
 void S9xTrace (void);
 void S9xSA1Trace (void);
 void S9xTraceMessage (const char *);

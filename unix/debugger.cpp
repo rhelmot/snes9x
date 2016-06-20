@@ -38,6 +38,7 @@ void S9xDebugInteract (void)
 	char		*line = NULL;
 	int32		cycles;
 	char		*p;
+	bool		is_redo = true;
 
 	if (is_start) {
 		// Do some things which shouldn't be done in the signal handler
@@ -60,10 +61,11 @@ void S9xDebugInteract (void)
 		add_history(line);
 		free(line_persist);
 		line_persist = strdup(line);
+		is_redo = false;
 	}
 
 	cycles = CPU.Cycles;
-	if (line_persist) S9xDebugCommand(line_persist, std::cout);
+	if (line_persist) S9xDebugCommand(line_persist, std::cout, is_redo);
 	CPU.Cycles = cycles;
 }
 
