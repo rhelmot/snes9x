@@ -220,9 +220,9 @@ static const char	*HelpMessage[] =
 	"s, step                   - Step to the next emulated instruction",
 	"n, next                   - Step to the next emulated instruction, stepping over subroutine calls",
 	"c, continue               - Continue execution",
+	"f, frame [n]              - Step n frames forward. Will break as soon as rendering finishes for the nth frame."
 
 	"z                         - ???? Dumps some sort of VRAM data, I don't know what this does",
-	"f                         - ???? Some sort of attempt to step some number of frames forward?",
 	"",
 	NULL
 };
@@ -2602,7 +2602,9 @@ void S9xDebugCommand (const char *Line, std::ostream &out, bool is_redo)
 		IPPU.FrameSkip = 0;
 
 		if (sscanf(&Line[1], "%u", &ICPU.FrameAdvanceCount) != 1)
-			ICPU.Frame = 0;
+			ICPU.FrameAdvanceCount = 0;
+		else
+			if (ICPU.FrameAdvanceCount) ICPU.FrameAdvanceCount--;
 	}
 
 	else if (*Line == 'c' || *Line == 'C') {

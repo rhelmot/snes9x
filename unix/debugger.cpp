@@ -78,6 +78,7 @@ void S9xStartDebug(void)
 	S9xBreakpoint[5].Enabled = FALSE;
 
 	CPU.Flags |= DEBUG_MODE_FLAG;
+	CPU.Flags &= ~(FRAME_ADVANCE_FLAG | SINGLE_STEP_FLAG);
 	is_start = true;
 }
 
