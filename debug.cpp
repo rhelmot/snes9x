@@ -178,12 +178,6 @@
 
 #ifdef DEBUGGER
 
-#ifdef __WIN32__
-#include <WinSock2.h>
-#else
-#include <sys/select.h>
-#endif
-
 #include <stdarg.h>
 #include <iomanip>
 #include <iostream>
@@ -202,6 +196,10 @@ extern SDMA	DMA[8];
 extern FILE	*apu_trace;
 FILE		*trace = NULL, *trace2 = NULL;
 
+struct SBreakPoint	S9xBreakpoint[6];
+struct SWatchPoint	S9xWatchpoint[6];
+struct SDebug	Debug = { { 0, 0 },{ 0, 0 } };
+int step_depth;
 
 static const char	*HelpMessage[] =
 {
@@ -220,6 +218,7 @@ static const char	*HelpMessage[] =
 	"s, step                   - Step to the next emulated instruction",
 	"n, next                   - Step to the next emulated instruction, stepping over subroutine calls",
 	"c, continue               - Continue execution",
+	"o, out                    - Step until the current function returns"
 	"f, frame [n]              - Step n frames forward. Will break as soon as rendering finishes for the nth frame."
 
 	"z                         - ???? Dumps some sort of VRAM data, I don't know what this does",
@@ -290,12 +289,8 @@ static uint8 S9xDebugSA1GetByte (uint32);
 static uint16 S9xDebugSA1GetWord (uint32);
 static uint8 debug_cpu_op_print (char *, uint8, uint16);
 static uint8 debug_sa1_op_print (char *, uint8, uint16);
-static void debug_line_print (const char *, std::ostream &out);
-static short debug_get_start_address (const char *, uint8 *, uint32 *);
 static void debug_print_window (std:: ostream &, uint8 *);
 static const char * debug_clip_fn (int);
-static void debug_whats_used (void);
-static void debug_whats_missing (void);
 
 
 uint8 S9xDebugGetByte (uint32 Address)
@@ -430,7 +425,7 @@ static uint8 debug_cpu_op_print (char *Line, uint8 Bank, uint16 Address)
 	uint8	Size = 0;
 
 	S9xOpcode = S9xDebugGetByte((Bank << 16) + Address);
-	sprintf(Line, "$%02X:%04X %02X ", Bank, Address, S9xOpcode);
+	sprintf(Line, "$%02X%04X %02X ", Bank, Address, S9xOpcode);
 
 	Operant[0] = S9xDebugGetByte((Bank << 16) + Address + 1);
 	Operant[1] = S9xDebugGetByte((Bank << 16) + Address + 2);
@@ -551,7 +546,7 @@ static uint8 debug_cpu_op_print (char *Line, uint8 Bank, uint16 Address)
 					Operant[0]);
 			Word = Operant[0];
 			Word += Registers.D.W;
-			sprintf(Line, "%-32s[$00:%04X]", Line, Word);
+			sprintf(Line, "%-32s[$00%04X]", Line, Word);
 			Size = 2;
 			break;
 
@@ -565,7 +560,7 @@ static uint8 debug_cpu_op_print (char *Line, uint8 Bank, uint16 Address)
 			Word = Operant[0];
 			Word += Registers.D.W;
 			Word += Registers.X.W;
-			sprintf(Line, "%-32s[$00:%04X]", Line, Word);
+			sprintf(Line, "%-32s[$00%04X]", Line, Word);
 			Size = 2;
 			break;
 
@@ -579,7 +574,7 @@ static uint8 debug_cpu_op_print (char *Line, uint8 Bank, uint16 Address)
 			Word = Operant[0];
 			Word += Registers.D.W;
 			Word += Registers.Y.W;
-			sprintf(Line, "%-32s[$00:%04X]", Line, Word);
+			sprintf(Line, "%-32s[$00%04X]", Line, Word);
 			Size = 2;
 			break;
 
@@ -593,7 +588,7 @@ static uint8 debug_cpu_op_print (char *Line, uint8 Bank, uint16 Address)
 			Word = Operant[0];
 			Word += Registers.D.W;
 			Word = S9xDebugGetWord(Word);
-			sprintf(Line, "%-32s[$%02X:%04X]", Line, Registers.DB, Word);
+			sprintf(Line, "%-32s[$%02X%04X]", Line, Registers.DB, Word);
 			Size = 2;
 			break;
 
@@ -608,7 +603,7 @@ static uint8 debug_cpu_op_print (char *Line, uint8 Bank, uint16 Address)
 			Word += Registers.D.W;
 			Word += Registers.X.W;
 			Word = S9xDebugGetWord(Word);
-			sprintf(Line, "%-32s[$%02X:%04X]", Line, Registers.DB, Word);
+			sprintf(Line, "%-32s[$%02X%04X]", Line, Registers.DB, Word);
 			Size = 2;
 			break;
 
@@ -623,7 +618,7 @@ static uint8 debug_cpu_op_print (char *Line, uint8 Bank, uint16 Address)
 			Word += Registers.D.W;
 			Word = S9xDebugGetWord(Word);
 			Word += Registers.Y.W;
-			sprintf(Line, "%-32s[$%02X:%04X]", Line, Registers.DB, Word);
+			sprintf(Line, "%-32s[$%02X%04X]", Line, Registers.DB, Word);
 			Size = 2;
 			break;
 
@@ -638,7 +633,7 @@ static uint8 debug_cpu_op_print (char *Line, uint8 Bank, uint16 Address)
 			Word += Registers.D.W;
 			Byte = S9xDebugGetByte(Word + 2);
 			Word = S9xDebugGetWord(Word);
-			sprintf(Line, "%-32s[$%02X:%04X]", Line, Byte, Word);
+			sprintf(Line, "%-32s[$%02X%04X]", Line, Byte, Word);
 			Size = 2;
 			break;
 
@@ -654,7 +649,7 @@ static uint8 debug_cpu_op_print (char *Line, uint8 Bank, uint16 Address)
 			Byte = S9xDebugGetByte(Word + 2);
 			Word = S9xDebugGetWord(Word);
 			Word += Registers.Y.W;
-			sprintf(Line, "%-32s[$%02X:%04X]", Line, Byte, Word);
+			sprintf(Line, "%-32s[$%02X%04X]", Line, Byte, Word);
 			Size = 2;
 			break;
 
@@ -668,7 +663,7 @@ static uint8 debug_cpu_op_print (char *Line, uint8 Bank, uint16 Address)
 			        Operant[1],
 			        Operant[0]);
 			Word = (Operant[1] << 8) | Operant[0];
-			sprintf(Line, "%-32s[$%02X:%04X]", Line, Registers.DB, Word);
+			sprintf(Line, "%-32s[$%02X%04X]", Line, Registers.DB, Word);
 			Size = 3;
 			break;
 
@@ -683,7 +678,7 @@ static uint8 debug_cpu_op_print (char *Line, uint8 Bank, uint16 Address)
 			        Operant[0]);
 			Word = (Operant[1] << 8) | Operant[0];
 			Word += Registers.X.W;
-			sprintf(Line, "%-32s[$%02X:%04X]", Line, Registers.DB, Word);
+			sprintf(Line, "%-32s[$%02X%04X]", Line, Registers.DB, Word);
 			Size = 3;
 			break;
 
@@ -698,7 +693,7 @@ static uint8 debug_cpu_op_print (char *Line, uint8 Bank, uint16 Address)
 			        Operant[0]);
 			Word = (Operant[1] << 8) | Operant[0];
 			Word += Registers.Y.W;
-			sprintf(Line, "%-32s[$%02X:%04X]", Line, Registers.DB, Word);
+			sprintf(Line, "%-32s[$%02X%04X]", Line, Registers.DB, Word);
 			Size = 3;
 			break;
 
@@ -714,7 +709,7 @@ static uint8 debug_cpu_op_print (char *Line, uint8 Bank, uint16 Address)
 			        Operant[1],
 			        Operant[0]);
 			Word = (Operant[1] << 8) | Operant[0];
-			sprintf(Line, "%-32s[$%02X:%04X]", Line, Operant[2], Word);
+			sprintf(Line, "%-32s[$%02X%04X]", Line, Operant[2], Word);
 			Size = 4;
 			break;
 
@@ -731,7 +726,7 @@ static uint8 debug_cpu_op_print (char *Line, uint8 Bank, uint16 Address)
 			        Operant[0]);
 			Word = (Operant[1] << 8) | Operant[0];
 			Word += Registers.X.W;
-			sprintf(Line, "%-32s[$%02X:%04X]", Line, Operant[2], Word);
+			sprintf(Line, "%-32s[$%02X%04X]", Line, Operant[2], Word);
 			Size = 4;
 			break;
 
@@ -744,7 +739,7 @@ static uint8 debug_cpu_op_print (char *Line, uint8 Bank, uint16 Address)
 			        Operant[0]);
 			Word = Registers.S.W;
 			Word += Operant[0];
-			sprintf(Line, "%-32s[$00:%04X]", Line, Word);
+			sprintf(Line, "%-32s[$00%04X]", Line, Word);
 			Size = 2;
 			break;
 
@@ -759,7 +754,7 @@ static uint8 debug_cpu_op_print (char *Line, uint8 Bank, uint16 Address)
 			Word += Operant[0];
 			Word = S9xDebugGetWord(Word);
 			Word += Registers.Y.W;
-			sprintf(Line, "%-32s[$%02X:%04X]", Line, Registers.DB, Word);
+			sprintf(Line, "%-32s[$%02X%04X]", Line, Registers.DB, Word);
 			Size = 2;
 			break;
 
@@ -774,7 +769,7 @@ static uint8 debug_cpu_op_print (char *Line, uint8 Bank, uint16 Address)
 			        Operant[0]);
 			Word = (Operant[1] << 8) | Operant[0];
 			Word = S9xDebugGetWord(Word);
-			sprintf(Line, "%-32s[$%02X:%04X]", Line, Registers.PB, Word);
+			sprintf(Line, "%-32s[$%02X%04X]", Line, Registers.PB, Word);
 			Size = 3;
 			break;
 
@@ -790,7 +785,7 @@ static uint8 debug_cpu_op_print (char *Line, uint8 Bank, uint16 Address)
 			Word = (Operant[1] << 8) | Operant[0];
 			Byte = S9xDebugGetByte(Word + 2);
 			Word = S9xDebugGetWord(Word);
-			sprintf(Line, "%-32s[$%02X:%04X]", Line, Byte, Word);
+			sprintf(Line, "%-32s[$%02X%04X]", Line, Byte, Word);
 			Size = 3;
 			break;
 
@@ -806,7 +801,7 @@ static uint8 debug_cpu_op_print (char *Line, uint8 Bank, uint16 Address)
 			Word = (Operant[1] << 8) | Operant[0];
 			Word += Registers.X.W;
 			Word = S9xDebugGetWord(ICPU.ShiftedPB + Word);
-			sprintf(Line, "%-32s[$%02X:%04X]", Line, Registers.PB, Word);
+			sprintf(Line, "%-32s[$%02X%04X]", Line, Registers.PB, Word);
 			Size = 3;
 			break;
 
@@ -871,7 +866,7 @@ static uint8 debug_sa1_op_print (char *Line, uint8 Bank, uint16 Address)
 	uint8	Size = 0;
 
 	S9xOpcode = S9xDebugSA1GetByte((Bank << 16) + Address);
-	sprintf(Line, "$%02X:%04X %02X ", Bank, Address, S9xOpcode);
+	sprintf(Line, "$%02X%04X %02X ", Bank, Address, S9xOpcode);
 
 	Operant[0] = S9xDebugSA1GetByte((Bank << 16) + Address + 1);
 	Operant[1] = S9xDebugSA1GetByte((Bank << 16) + Address + 2);
@@ -992,7 +987,7 @@ static uint8 debug_sa1_op_print (char *Line, uint8 Bank, uint16 Address)
 			        Operant[0]);
 			Word = Operant[0];
 			Word += SA1Registers.D.W;
-			sprintf(Line, "%-32s[$00:%04X]", Line, Word);
+			sprintf(Line, "%-32s[$00%04X]", Line, Word);
 			Size = 2;
 			break;
 
@@ -1006,7 +1001,7 @@ static uint8 debug_sa1_op_print (char *Line, uint8 Bank, uint16 Address)
 			Word = Operant[0];
 			Word += SA1Registers.D.W;
 			Word += SA1Registers.X.W;
-			sprintf(Line, "%-32s[$00:%04X]", Line, Word);
+			sprintf(Line, "%-32s[$00%04X]", Line, Word);
 			Size = 2;
 			break;
 
@@ -1020,7 +1015,7 @@ static uint8 debug_sa1_op_print (char *Line, uint8 Bank, uint16 Address)
 			Word = Operant[0];
 			Word += SA1Registers.D.W;
 			Word += SA1Registers.Y.W;
-			sprintf(Line, "%-32s[$00:%04X]", Line, Word);
+			sprintf(Line, "%-32s[$00%04X]", Line, Word);
 			Size = 2;
 			break;
 
@@ -1034,7 +1029,7 @@ static uint8 debug_sa1_op_print (char *Line, uint8 Bank, uint16 Address)
 			Word = Operant[0];
 			Word += SA1Registers.D.W;
 			Word = S9xDebugSA1GetWord(Word);
-			sprintf(Line, "%-32s[$%02X:%04X]", Line, SA1Registers.DB, Word);
+			sprintf(Line, "%-32s[$%02X%04X]", Line, SA1Registers.DB, Word);
 			Size = 2;
 			break;
 
@@ -1049,7 +1044,7 @@ static uint8 debug_sa1_op_print (char *Line, uint8 Bank, uint16 Address)
 			Word += SA1Registers.D.W;
 			Word += SA1Registers.X.W;
 			Word = S9xDebugSA1GetWord(Word);
-			sprintf(Line, "%-32s[$%02X:%04X]", Line, SA1Registers.DB, Word);
+			sprintf(Line, "%-32s[$%02X%04X]", Line, SA1Registers.DB, Word);
 			Size = 2;
 			break;
 
@@ -1064,7 +1059,7 @@ static uint8 debug_sa1_op_print (char *Line, uint8 Bank, uint16 Address)
 			Word += SA1Registers.D.W;
 			Word = S9xDebugSA1GetWord(Word);
 			Word += SA1Registers.Y.W;
-			sprintf(Line, "%-32s[$%02X:%04X]", Line, SA1Registers.DB, Word);
+			sprintf(Line, "%-32s[$%02X%04X]", Line, SA1Registers.DB, Word);
 			Size = 2;
 			break;
 
@@ -1079,7 +1074,7 @@ static uint8 debug_sa1_op_print (char *Line, uint8 Bank, uint16 Address)
 			Word += SA1Registers.D.W;
 			Byte = S9xDebugSA1GetByte(Word + 2);
 			Word = S9xDebugSA1GetWord(Word);
-			sprintf(Line, "%-32s[$%02X:%04X]", Line, Byte, Word);
+			sprintf(Line, "%-32s[$%02X%04X]", Line, Byte, Word);
 			Size = 2;
 			break;
 
@@ -1095,7 +1090,7 @@ static uint8 debug_sa1_op_print (char *Line, uint8 Bank, uint16 Address)
 			Byte = S9xDebugSA1GetByte(Word + 2);
 			Word = S9xDebugSA1GetWord(Word);
 			Word += SA1Registers.Y.W;
-			sprintf(Line, "%-32s[$%02X:%04X]", Line, Byte, Word);
+			sprintf(Line, "%-32s[$%02X%04X]", Line, Byte, Word);
 			Size = 2;
 			break;
 
@@ -1109,7 +1104,7 @@ static uint8 debug_sa1_op_print (char *Line, uint8 Bank, uint16 Address)
 			        Operant[1],
 			        Operant[0]);
 			Word = (Operant[1] << 8) | Operant[0];
-			sprintf(Line, "%-32s[$%02X:%04X]", Line, SA1Registers.DB, Word);
+			sprintf(Line, "%-32s[$%02X%04X]", Line, SA1Registers.DB, Word);
 			Size = 3;
 			break;
 
@@ -1124,7 +1119,7 @@ static uint8 debug_sa1_op_print (char *Line, uint8 Bank, uint16 Address)
 			        Operant[0]);
 			Word = (Operant[1] << 8) | Operant[0];
 			Word += SA1Registers.X.W;
-			sprintf(Line, "%-32s[$%02X:%04X]", Line, SA1Registers.DB, Word);
+			sprintf(Line, "%-32s[$%02X%04X]", Line, SA1Registers.DB, Word);
 			Size = 3;
 			break;
 
@@ -1139,7 +1134,7 @@ static uint8 debug_sa1_op_print (char *Line, uint8 Bank, uint16 Address)
 			        Operant[0]);
 			Word = (Operant[1] << 8) | Operant[0];
 			Word += SA1Registers.Y.W;
-			sprintf(Line, "%-32s[$%02X:%04X]", Line, SA1Registers.DB, Word);
+			sprintf(Line, "%-32s[$%02X%04X]", Line, SA1Registers.DB, Word);
 			Size = 3;
 			break;
 
@@ -1155,7 +1150,7 @@ static uint8 debug_sa1_op_print (char *Line, uint8 Bank, uint16 Address)
 			        Operant[1],
 			        Operant[0]);
 			Word = (Operant[1] << 8) | Operant[0];
-			sprintf(Line, "%-32s[$%02X:%04X]", Line, Operant[2], Word);
+			sprintf(Line, "%-32s[$%02X%04X]", Line, Operant[2], Word);
 			Size = 4;
 			break;
 
@@ -1172,7 +1167,7 @@ static uint8 debug_sa1_op_print (char *Line, uint8 Bank, uint16 Address)
 			        Operant[0]);
 			Word = (Operant[1] << 8) | Operant[0];
 			Word += SA1Registers.X.W;
-			sprintf(Line, "%-32s[$%02X:%04X]", Line, Operant[2], Word);
+			sprintf(Line, "%-32s[$%02X%04X]", Line, Operant[2], Word);
 			Size = 4;
 			break;
 
@@ -1185,7 +1180,7 @@ static uint8 debug_sa1_op_print (char *Line, uint8 Bank, uint16 Address)
 			        Operant[0]);
 			Word = SA1Registers.S.W;
 			Word += Operant[0];
-			sprintf(Line, "%-32s[$00:%04X]", Line, Word);
+			sprintf(Line, "%-32s[$00%04X]", Line, Word);
 			Size = 2;
 			break;
 
@@ -1200,7 +1195,7 @@ static uint8 debug_sa1_op_print (char *Line, uint8 Bank, uint16 Address)
 			Word += Operant[0];
 			Word = S9xDebugSA1GetWord(Word);
 			Word += SA1Registers.Y.W;
-			sprintf(Line, "%-32s[$%02X:%04X]", Line, SA1Registers.DB, Word);
+			sprintf(Line, "%-32s[$%02X%04X]", Line, SA1Registers.DB, Word);
 			Size = 2;
 			break;
 
@@ -1215,7 +1210,7 @@ static uint8 debug_sa1_op_print (char *Line, uint8 Bank, uint16 Address)
 			        Operant[0]);
 			Word = (Operant[1] << 8) | Operant[0];
 			Word = S9xDebugSA1GetWord(Word);
-			sprintf(Line, "%-32s[$%02X:%04X]", Line, SA1Registers.PB, Word);
+			sprintf(Line, "%-32s[$%02X%04X]", Line, SA1Registers.PB, Word);
 			Size = 3;
 			break;
 
@@ -1231,7 +1226,7 @@ static uint8 debug_sa1_op_print (char *Line, uint8 Bank, uint16 Address)
 			Word = (Operant[1] << 8) | Operant[0];
 			Byte = S9xDebugSA1GetByte(Word + 2);
 			Word = S9xDebugSA1GetWord(Word);
-			sprintf(Line, "%-32s[$%02X:%04X]", Line, Byte, Word);
+			sprintf(Line, "%-32s[$%02X%04X]", Line, Byte, Word);
 			Size = 3;
 			break;
 
@@ -1247,7 +1242,7 @@ static uint8 debug_sa1_op_print (char *Line, uint8 Bank, uint16 Address)
 			Word = (Operant[1] << 8) | Operant[0];
 			Word += SA1Registers.X.W;
 			Word = S9xDebugSA1GetWord(SA1.ShiftedPB + Word);
-			sprintf(Line, "%-32s[$%02X:%04X]", Line, SA1Registers.PB, Word);
+			sprintf(Line, "%-32s[$%02X%04X]", Line, SA1Registers.PB, Word);
 			Size = 3;
 			break;
 
@@ -1320,24 +1315,6 @@ static void debug_print_window(std::ostream &out, uint8 *window)
 		}
 	}
 	out << '\n';
-}
-
-static void debug_line_print (const char *Line, std::ostream &out)
-{
-	out << Line << '\n';
-}
-
-static short debug_get_start_address (const char *Line, uint8 *Bank, uint32 *Address)
-{
-	uint32	a, b;
-
-	if (sscanf(Line + 1, " $%x:%x", &b, &a) != 2)
-		return (-1);
-
-	*Bank = b;
-	*Address = a;
-
-	return (1);
 }
 
 static const char * debug_clip_fn(int logic)
@@ -2011,8 +1988,8 @@ void S9xDebugPrintVectors (std::ostream &out)
 	out << "Vectors:\n";
 	out << "      8 Bit   16 Bit \n";
 	for (int i = 0; i < 6; i++) {
-		sprintf(string, "%s $00:%04X|$00:%04X", vectors[i].name, S9xDebugGetWord(vectors[i].addr8), S9xDebugGetWord(vectors[i].addr16));
-		debug_line_print(string, out);
+		sprintf(string, "%s $00%04X|$00%04X\n", vectors[i].name, S9xDebugGetWord(vectors[i].addr8), S9xDebugGetWord(vectors[i].addr16));
+		out << string;
 	}
 }
 
@@ -2161,19 +2138,24 @@ Sprites: Small: %dx%d\n\
 }
 
 void S9xDebugPrintBreakpoints (std::ostream &out) {
+	char string[512];
 	out << "Active breakpoints:\n";
 	for (int i = 0; i < 5; i++) {
 		if (S9xBreakpoint[i].Enabled) {
-			out << "  " << i << ": $" << std::setw(6) << std::setfill('0') << S9xBreakpoint[i].Address << '\n';
+			snprintf(string, 512, "  %d: $%06X\n", i, S9xBreakpoint[i].Address);
+			out << string;
 		}
 	}
 }
 
 void S9xDebugPrintWatchpoints (std::ostream &out) {
+	char string[512];
 	out << "Active watchpoints:\n";
 	for (int i = 0; i < 6; i++) {
 		if (S9xWatchpoint[i].Mode != WATCH_MODE_NONE) {
-			out << "  " << i << ": $" << std::setw(6) << std::setfill('0') << S9xWatchpoint[i].Address << " (";
+			snprintf(string, 512, "  %d: $%06X (", i, S9xWatchpoint[i].Address);
+			out << string;
+
 			out << (S9xWatchpoint[i].Mode == WATCH_MODE_READ ? "read" :
 				(S9xWatchpoint[i].Mode == WATCH_MODE_WRITE ? "write" : "both"));
 			out << ")\n";
@@ -2235,17 +2217,14 @@ bool S9xRemoveWatchpoint(int i) {
 }
 
 void S9xDebugStepOver() {
-	uint8 nextOp = S9xDebugGetByte((uint32)Registers.PB | ((uint32)Registers.PCw << 16));
-	if (nextOp == 0x20 || nextOp == 0x22) {	// JSR or JSL
-		S9xBreakpoint[5].Enabled = TRUE;
-		S9xBreakpoint[5].Address = (uint32)Registers.PB + ((uint32)Registers.PCw << 16) + (nextOp == 0x20 ? 3 : 4);
-		CPU.Flags |= BREAK_FLAG;
-		CPU.Flags |= CONTINUE_FLAG;
-	}
-	else {
-		CPU.Flags |= SINGLE_STEP_FLAG;
-	}
+	CPU.Flags |= STEP_OUT_FLAG;
+	step_depth = 0;
+	S9xStopDebug();
+}
 
+void S9xDebugStepOut() {
+	CPU.Flags |= STEP_OUT_FLAG;
+	step_depth = 1;
 	S9xStopDebug();
 }
 
@@ -2259,38 +2238,53 @@ void S9xDebugContinue() {
 	S9xStopDebug();
 }
 
+void S9xDebugFrameAdvance(unsigned int frames) {
+	CPU.Flags |= FRAME_ADVANCE_FLAG;
+	S9xStopDebug();
+
+	IPPU.RenderThisFrame = TRUE;
+	IPPU.FrameSkip = 0;
+	ICPU.FrameAdvanceCount = frames;
+}
+
 void S9xDebugCommand (const char *Line, std::ostream &out, bool is_redo)
 {
-	uint8	Bank = Registers.PB;
-	uint32	Address = Registers.PCw;
 	char	string[512];
 
 	if (strncasecmp(Line, "status", 6) == 0) {
 		S9xDebugPrintStatus(out);
 	}
 
-	else if (strncasecmp(Line, "info", 4) == 0)
-	{
-		if (strncasecmp(Line + 5, "vectors", 7) == 0)
+	else if (Line[0] == 'i') {
+		const char * cmd = strchr(Line, ' ');
+		if (!cmd) {
+			out << "Usage: info [vectors | colors-snes | colors-rgb | sprites | missing | used | breakpoints | watchpoints]\n";
+			return;
+		}
+		cmd++;
+
+		if (strncasecmp(cmd, "vectors", 7) == 0)
 			S9xDebugPrintVectors(out);
-		else if (strncasecmp(Line + 5, "colors-rgb", 10) == 0 ||
-				strncasecmp(Line + 5, "colours-rgb", 11) == 0)
+		else if (strncasecmp(cmd, "colors-rgb", 10) == 0 ||
+				strncasecmp(cmd, "colours-rgb", 11) == 0)
 			S9xDebugPrintColors(out, true);
-		else if (strncasecmp(Line + 5, "colors", 6) == 0 ||
-				strncasecmp(Line + 5, "colours", 6) == 0 ||
-				strncasecmp(Line + 5, "colors-snes", 11) == 0 ||
-				strncasecmp(Line + 5, "colours-snes", 12) == 0)
+		else if (strncasecmp(cmd, "colors", 6) == 0 ||
+				strncasecmp(cmd, "colours", 6) == 0 ||
+				strncasecmp(cmd, "colors-snes", 11) == 0 ||
+				strncasecmp(cmd, "colours-snes", 12) == 0)
 			S9xDebugPrintColors(out, false);
-		else if (strncasecmp(Line + 5, "sprites", 7) == 0 ||
-				strncasecmp(Line + 5, "oam", 3) == 0)
+		else if (strncasecmp(cmd, "sprites", 7) == 0 ||
+				strncasecmp(cmd, "oam", 3) == 0)
 			S9xDebugPrintSprites(out);
-		else if (strncasecmp(Line + 5, "missing", 7) == 0)
+		else if (strncasecmp(cmd, "missing", 7) == 0)
 			S9xDebugPrintWhatsMissing(out);
-		else if (strncasecmp(Line + 5, "used", 4) == 0)
+		else if (strncasecmp(cmd, "used", 4) == 0)
 			S9xDebugPrintWhatsUsed(out);
-		else if (strncasecmp(Line + 5, "breakpoints", 11) == 0)
+		else if (strncasecmp(cmd, "breakpoints", 11) == 0 ||
+		    	strncasecmp(cmd, "break", 5) == 0)
 			S9xDebugPrintBreakpoints(out);
-		else if (strncasecmp(Line + 5, "watchpoints", 11) == 0)
+		else if (strncasecmp(cmd, "watchpoints", 11) == 0 ||
+				strncasecmp(cmd, "watch", 5) == 0)
 			S9xDebugPrintWatchpoints(out);
 		else
 			out << "Usage: info [vectors | colors-snes | colors-rgb | sprites | missing | used | breakpoints | watchpoints]\n";
@@ -2379,14 +2373,14 @@ void S9xDebugCommand (const char *Line, std::ostream &out, bool is_redo)
 
 		// Do it!
 		int perline = (wordsize == 1 ? 16 : (wordsize == 2 ? 8 : 4));
-		for (int i = 0; i < count; i++) {
+		for (unsigned int i = 0; i < count; i++) {
 			if (format == 2) {
 				address += debug_cpu_op_print(string, address >> 16, address & 0xFFFF);
 				out << string << '\n';
 			} else {
 				if (i % perline == 0) {
 					if (i != 0) out << '\n';
-					sprintf(string, "$%02X:%04X", address >> 16, address & 0xFFFF);
+					sprintf(string, "$%06X", address);
 					out << string;
 				}
 				uint32 value = 0;
@@ -2412,13 +2406,14 @@ void S9xDebugCommand (const char *Line, std::ostream &out, bool is_redo)
 	{
 		int count;
 		FILE *fs;
-		if (sscanf(&Line[4], "$%x %d", &Address, &count) == 2)
+		unsigned int addr;
+		if (sscanf(&Line[4], "$%x %d", &addr, &count) == 2)
 		{
-			sprintf(string, "%06x%05d.sd2", Address, count);
+			sprintf(string, "%06x%05d.sd2", addr, count);
 			fs = fopen(string, "wb");
 			if (fs) {
 				for (int i = 0; i < count; i++)
-					putc(S9xDebugGetByte(Address + i), fs);
+					putc(S9xDebugGetByte(addr + i), fs);
 				fclose(fs);
 				out << "Dumped " << count << " bytes to " << string << '\n';
 			} else {
@@ -2501,8 +2496,11 @@ void S9xDebugCommand (const char *Line, std::ostream &out, bool is_redo)
 
 		for (int l = 0; l < 32; l++)
 		{
-			for (int c = 0; c < 32; c++, p++)
-				out << std::setw(4) << std::setfill('0') << *p++ << ',';
+			for (int c = 0; c < 32; c++, p++) {
+				sprintf(string, "%04X ", *p++);
+				out << string;
+			}
+			out << '\n';
 		}
 	}
 
@@ -2510,19 +2508,26 @@ void S9xDebugCommand (const char *Line, std::ostream &out, bool is_redo)
 		S9xDebugStepOver();
 	}
 
+	else if (*Line == 'o' || *Line == 'O') {	// Step out
+		S9xDebugStepOut();
+	}
+
 	else if (*Line == 'b' || *Line == 'B') { // Break
 		uint32 addr;
 		if (sscanf(Line, "%*s $%x", &addr) != 1) {
-			sprintf(string, "Usage: break ${addr}\n");
+			out << "Usage: break ${addr}\n";
 			return;
 		}
 		if (addr > 0xFFFFFF) {
-			sprintf(string, "Invalid address\n");
+			out << "Invalid address\n";
 			return;
 		}
 		int i = S9xSetBreakpoint(addr);
 		if (i == -1) {
-			sprintf(string, "Too many breakpoints!\n");
+			out << "Too many breakpoints!\n";
+		} else {
+			sprintf(string, "Set breakpoint %d\n", i);
+			out << string;
 		}
 	}
 
@@ -2530,11 +2535,11 @@ void S9xDebugCommand (const char *Line, std::ostream &out, bool is_redo)
 		uint32 addr;
 		uint8 type;
 		if (sscanf(Line, "%*s $%x %s", &addr, string) != 2) {
-			sprintf(string, "Usage: watch ${addr} {read,write,both}\n");
+			out << "Usage: watch ${addr} {read,write,both}\n";
 			return;
 		}
 		if (addr > 0xFFFFFF) {
-			sprintf(string, "Invalid address\n");
+			out << "Invalid address\n";
 			return;
 		}
 		if (string[0] == 'r' || string[0] == 'R')
@@ -2544,49 +2549,54 @@ void S9xDebugCommand (const char *Line, std::ostream &out, bool is_redo)
 		else if (string[0] == 'b' || string[0] == 'B')
 			type = WATCH_MODE_BOTH;
 		else {
-			sprintf(string, "Usage: watch ${addr} {read,write,both}\n");
+			out << "Usage: watch ${addr} {read,write,both}\n";
 			return;
 		}
 
 		int i = S9xSetWatchpoint(addr, type);
 		if (i == -1) {
-			sprintf(string, "Too many watchpoints!\n");
+			out << "Too many watchpoints!\n";
+		} else {
+			sprintf(string, "Set watchpoint %d\n", i);
+			out << string;
 		}
 	}
 
 	else if (strncasecmp(Line, "unwatch", 7) == 0) {
 		int i;
 		if (sscanf(Line, "%*s %d", &i) != 1) {
-			sprintf(string, "Usage: unwatch {watchpoint num}\n");
+			out << "Usage: unwatch {watchpoint num}\n";
 			return;
 		}
 		if (i < 0 || i > 5) {
-			sprintf(string, "Bad watchpoint number\n");
+			out << "Bad watchpoint number\n";
 			return;
 		}
 
 		S9xRemoveWatchpoint(i);
 		sprintf(string, "Removed watchpoint %d\n", i);
+		out << string;
 	}
 
 	else if (*Line == 'u' || *Line == 'U') { // unbreak
 		int i;
 		if (sscanf(Line, "%*s %d", &i) != 1) {
-			sprintf(string, "Usage: unbreak {breakpoint num}\n");
+			out << "Usage: unbreak {breakpoint num}\n";
 			return;
 		}
 		if (i < 0 || i > 4) {
-			sprintf(string, "Bad breakpoint number\n");
+			out << "Bad breakpoint number\n";
 			return;
 		}
 		S9xRemoveBreakpoint(i);
 		sprintf(string, "Removed breakpoint %d\n", i);
+		out << string;
 	}
 
 	else if (*Line == '?' || strncasecmp(Line, "help", 4) == 0)
 	{
 		for (int i = 0; HelpMessage[i] != NULL; i++)
-			debug_line_print(HelpMessage[i], out);
+			out << HelpMessage[i] << '\n';
 	}
 
 	else if (*Line == 's' || *Line == 'S') {
@@ -2595,16 +2605,11 @@ void S9xDebugCommand (const char *Line, std::ostream &out, bool is_redo)
 
 	else if (*Line == 'f' || *Line == 'F')
 	{
-		CPU.Flags |= FRAME_ADVANCE_FLAG;
-		S9xStopDebug();
+		unsigned int frames = 0;
+		sscanf(&Line[1], "%u", &frames);
+		if (frames) frames--;
 
-		IPPU.RenderThisFrame = TRUE;
-		IPPU.FrameSkip = 0;
-
-		if (sscanf(&Line[1], "%u", &ICPU.FrameAdvanceCount) != 1)
-			ICPU.FrameAdvanceCount = 0;
-		else
-			if (ICPU.FrameAdvanceCount) ICPU.FrameAdvanceCount--;
+		S9xDebugFrameAdvance(frames);
 	}
 
 	else if (*Line == 'c' || *Line == 'C') {

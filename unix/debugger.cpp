@@ -42,7 +42,6 @@ void S9xDebugInteract (void)
 	static char	*line_persist = NULL;
 	char		*line = NULL;
 	int32		cycles;
-	char		*p;
 	bool		is_redo = true;
 
 	if (is_start) {
@@ -76,6 +75,8 @@ void S9xDebugInteract (void)
 
 void S9xStartDebug(void)
 {
+	if (CPU.Flags & DEBUG_MODE_FLAG) return;
+
 	Debug.Dump.Bank = 0;
 	Debug.Dump.Address = 0;
 	Debug.Unassemble.Bank = 0;
@@ -83,7 +84,7 @@ void S9xStartDebug(void)
 	S9xBreakpoint[5].Enabled = FALSE;
 
 	CPU.Flags |= DEBUG_MODE_FLAG;
-	CPU.Flags &= ~(FRAME_ADVANCE_FLAG | SINGLE_STEP_FLAG);
+	CPU.Flags &= ~(FRAME_ADVANCE_FLAG | SINGLE_STEP_FLAG | STEP_OUT_FLAG);
 	is_start = true;
 }
 

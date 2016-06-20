@@ -233,7 +233,7 @@ void S9xMainLoop (void)
 
 	#ifdef DEBUGGER
 		if (!(CPU.Flags & CONTINUE_FLAG)) {
-			if ((CPU.Flags & BREAK_FLAG) && !(CPU.Flags & SINGLE_STEP_FLAG))
+			if ((CPU.Flags & BREAK_FLAG) && !(CPU.Flags & (SINGLE_STEP_FLAG | STEP_OUT_FLAG)))
 			{
 				for (int Break = 0; Break != 6; Break++) {
 					if (S9xBreakpoint[Break].Enabled &&
@@ -253,11 +253,6 @@ void S9xMainLoop (void)
 		if (CPU.Flags & TRACE_FLAG)
 			S9xTrace();
 
-		if (CPU.Flags & SINGLE_STEP_FLAG)
-		{
-			CPU.Flags &= ~SINGLE_STEP_FLAG;
-			S9xStartDebug();
-		}
 	#endif
 
 		if (CPU.Flags & SCAN_KEYS_FLAG)
@@ -295,6 +290,12 @@ void S9xMainLoop (void)
 
 		if (Settings.SA1)
 			S9xSA1MainLoop();
+
+		if (CPU.Flags & SINGLE_STEP_FLAG)
+			S9xStartDebug();
+
+		if (CPU.Flags & STEP_OUT_FLAG && step_depth <= 0)
+			S9xStartDebug();
 	}
 
 	S9xPackStatus();

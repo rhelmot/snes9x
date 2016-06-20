@@ -278,8 +278,9 @@
 #define SCAN_KEYS_FLAG		(1 <<  4)	// CPU
 #define WATCH_FLAG			(1 <<  5)	// debugger
 #define CONTINUE_FLAG		(1 <<  6)	// debugger
+#define STEP_OUT_FLAG		(1 <<  7)	// debugger
+#define FRAME_ADVANCE_FLAG	(1 <<  9)	// debugger
 #define HALTED_FLAG			(1 << 12)	// APU
-#define FRAME_ADVANCE_FLAG	(1 <<  9)
 
 #define ROM_NAME_LEN	23
 #define AUTO_FRAMERATE	200

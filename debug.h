@@ -225,9 +225,10 @@ struct SDebug
 #define WATCH_MODE_WRITE 2
 #define WATCH_MODE_BOTH  3
 
-static struct SBreakPoint	S9xBreakpoint[6];
-static struct SWatchPoint	S9xWatchpoint[6];
-static struct SDebug	Debug = { { 0, 0 },{ 0, 0 } };
+extern struct SBreakPoint	S9xBreakpoint[6];
+extern struct SWatchPoint	S9xWatchpoint[6];
+extern struct SDebug	Debug;
+extern int step_depth;
 
 void S9xDebugPrintWhatsUsed (std::ostream &out);
 void S9xDebugPrintWhatsMissing(std::ostream &out);
@@ -246,6 +247,8 @@ bool S9xRemoveWatchpoint(int i);
 void S9xDebugStepOver();
 void S9xDebugStepInto();
 void S9xDebugContinue();
+void S9xDebugFrameAdvance();
+void S9xDebugStepOut();
 
 void S9xStartDebug (void);
 void S9xStopDebug (void);

@@ -3002,6 +3002,9 @@ static void Op22E1 (void)
 	PushW(Registers.PCw - 1);
 	Registers.SH = 1;
 	S9xSetPCBase(addr);
+#ifdef DEBUGGER
+	step_depth++;
+#endif
 }
 
 static void Op22E0 (void)
@@ -3010,6 +3013,9 @@ static void Op22E0 (void)
 	PushB(Registers.PB);
 	PushW(Registers.PCw - 1);
 	S9xSetPCBase(addr);
+#ifdef DEBUGGER
+	step_depth++;
+#endif
 }
 
 static void Op22Slow (void)
@@ -3020,6 +3026,9 @@ static void Op22Slow (void)
 	if (CheckEmulation())
 		Registers.SH = 1;
 	S9xSetPCBase(addr);
+#ifdef DEBUGGER
+	step_depth++;
+#endif
 }
 
 static void Op6BE1 (void)
@@ -3032,6 +3041,9 @@ static void Op6BE1 (void)
 	Registers.SH = 1;
 	Registers.PCw++;
 	S9xSetPCBase(Registers.PBPC);
+#ifdef DEBUGGER
+	step_depth--;
+#endif
 }
 
 static void Op6BE0 (void)
@@ -3041,6 +3053,9 @@ static void Op6BE0 (void)
 	PullB(Registers.PB);
 	Registers.PCw++;
 	S9xSetPCBase(Registers.PBPC);
+#ifdef DEBUGGER
+	step_depth--;
+#endif
 }
 
 static void Op6BSlow (void)
@@ -3052,6 +3067,9 @@ static void Op6BSlow (void)
 		Registers.SH = 1;
 	Registers.PCw++;
 	S9xSetPCBase(Registers.PBPC);
+#ifdef DEBUGGER
+	step_depth--;
+#endif
 }
 
 /* JSR/RTS ***************************************************************** */
@@ -3062,6 +3080,9 @@ static void Op20E1 (void)
 	AddCycles(ONE_CYCLE);
 	PushWE(Registers.PCw - 1);
 	S9xSetPCBase(ICPU.ShiftedPB + addr);
+#ifdef DEBUGGER
+	step_depth++;
+#endif
 }
 
 static void Op20E0 (void)
@@ -3070,6 +3091,9 @@ static void Op20E0 (void)
 	AddCycles(ONE_CYCLE);
 	PushW(Registers.PCw - 1);
 	S9xSetPCBase(ICPU.ShiftedPB + addr);
+#ifdef DEBUGGER
+	step_depth++;
+#endif
 }
 
 static void Op20Slow (void)
@@ -3088,6 +3112,9 @@ static void Op20Slow (void)
 	}
 
 	S9xSetPCBase(ICPU.ShiftedPB + addr);
+#ifdef DEBUGGER
+	step_depth++;
+#endif
 }
 
 static void OpFCE1 (void)
@@ -3098,6 +3125,9 @@ static void OpFCE1 (void)
 	PushW(Registers.PCw - 1);
 	Registers.SH = 1;
 	S9xSetPCBase(ICPU.ShiftedPB + addr);
+#ifdef DEBUGGER
+	step_depth++;
+#endif
 }
 
 static void OpFCE0 (void)
@@ -3105,6 +3135,9 @@ static void OpFCE0 (void)
 	uint16	addr = AbsoluteIndexedIndirect(JSR);
 	PushW(Registers.PCw - 1);
 	S9xSetPCBase(ICPU.ShiftedPB + addr);
+#ifdef DEBUGGER
+	step_depth++;
+#endif
 }
 
 static void OpFCSlow (void)
@@ -3114,6 +3147,9 @@ static void OpFCSlow (void)
 	if (CheckEmulation())
 		Registers.SH = 1;
 	S9xSetPCBase(ICPU.ShiftedPB + addr);
+#ifdef DEBUGGER
+	step_depth++;
+#endif
 }
 
 static void Op60E1 (void)
@@ -3123,6 +3159,9 @@ static void Op60E1 (void)
 	AddCycles(ONE_CYCLE);
 	Registers.PCw++;
 	S9xSetPCBase(Registers.PBPC);
+#ifdef DEBUGGER
+	step_depth--;
+#endif
 }
 
 static void Op60E0 (void)
@@ -3132,6 +3171,9 @@ static void Op60E0 (void)
 	AddCycles(ONE_CYCLE);
 	Registers.PCw++;
 	S9xSetPCBase(Registers.PBPC);
+#ifdef DEBUGGER
+	step_depth--;
+#endif
 }
 
 static void Op60Slow (void)
@@ -3150,6 +3192,9 @@ static void Op60Slow (void)
 	AddCycles(ONE_CYCLE);
 	Registers.PCw++;
 	S9xSetPCBase(Registers.PBPC);
+#ifdef DEBUGGER
+	step_depth--;
+#endif
 }
 
 /* MVN/MVP ***************************************************************** */
