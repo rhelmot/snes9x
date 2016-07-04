@@ -488,13 +488,10 @@ void S9xLoadConfigFiles (char **argv, int argc)
 
 #ifdef DEBUGGER
 	if (conf.GetBool("DEBUG::Debugger", false))
-		S9xStartDebug();
+		Settings.DebugOnStart = true;
 
 	if (conf.GetBool("DEBUG::Trace", false))
-	{
-		ENSURE_TRACE_OPEN(trace,"trace.log","wb")
-		CPU.Flags |= TRACE_FLAG;
-	}
+		Settings.TraceOnStart = true;
 #endif
 
 	S9xParsePortConfig(conf, 1);
@@ -836,13 +833,10 @@ char * S9xParseArgs (char **argv, int argc)
 		
 		#ifdef DEBUGGER
 			if (!strcasecmp(argv[i], "-debug"))
-				S9xStartDebug();
+				Settings.DebugOnStart = true;
 			else
 			if (!strcasecmp(argv[i], "-trace"))
-			{
-				ENSURE_TRACE_OPEN(trace,"trace.log","wb")
-				CPU.Flags |= TRACE_FLAG;
-			}
+				Settings.TraceOnStart = true;
 			else
 		#endif
 

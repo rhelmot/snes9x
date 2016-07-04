@@ -19,10 +19,22 @@ void debug_setup() {
 		read_history(filename);
 	}
 
-	CPU.Flags = DEBUG_MODE_FLAG;
-	printf("\nWelcome to the Snes9x Debugger!\n"
-			"Press '?' for help, or 'c' to begin execution.\n"
-			"Return to this prompt at any time with ctrl-c\n\n");
+	if (Settings.TraceOnStart) {
+		printf("Instruction tracing to trace.log enabled\n");
+		S9xTrace();
+	}
+
+	if (Settings.DebugOnStart) {
+		CPU.Flags = DEBUG_MODE_FLAG;
+		printf("\nWelcome to the Snes9x Debugger!\n"
+				"Press '?' for help, or 'c' to begin execution.\n"
+				"Return to this prompt at any time with ctrl-c.\n\n");
+	} else {
+		printf("\nWelcome to the Snes9x Debugger!\n"
+				"Press ctrl-c to activate the debug prompt.\n"
+				"Then, press '?' for help or 'c' to resume execution.\n\n");
+	}
+
 }
 
 void debug_teardown() {

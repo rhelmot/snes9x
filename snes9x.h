@@ -451,6 +451,11 @@ struct SSettings
 	bool8	UpAndDown;
 
 	bool8	OpenGLEnable;
+
+#ifdef DEBUGGER
+	bool8	DebugOnStart;
+	bool8	TraceOnStart;
+#endif
 };
 
 struct SSNESGameFixes
