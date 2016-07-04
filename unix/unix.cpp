@@ -315,7 +315,7 @@ static pthread_mutex_t	mutex;
 #ifdef JOYSTICK_SUPPORT
 static uint8		js_mod[8]     = { 0, 0, 0, 0, 0, 0, 0, 0 };
 static int			js_fd[8]      = { -1, -1, -1, -1, -1, -1, -1, -1 };
-static const char	*js_device[8] = { "/dev/js0", "/dev/js1", "/dev/js2", "/dev/js3", "/dev/js4", "/dev/js5", "/dev/js6", "/dev/js7" };
+static const char	*js_device[8] = { "/dev/input/js0", "/dev/input/js1", "/dev/input/js2", "/dev/input/js3", "/dev/input/js4", "/dev/input/js5", "/dev/input/js6", "/dev/input/js7" };
 #endif
 
 #ifdef NETPLAY_SUPPORT
@@ -666,14 +666,14 @@ void S9xParsePortConfig (ConfigFile &conf, int pass)
 
 #ifdef JOYSTICK_SUPPORT
 	unixSettings.JoystickEnabled   = conf.GetBool     ("Unix::EnableGamePad",       true);
-	js_device[0]                   = conf.GetStringDup("Unix::PadDevice1",          NULL);
-	js_device[1]                   = conf.GetStringDup("Unix::PadDevice2",          NULL);
-	js_device[2]                   = conf.GetStringDup("Unix::PadDevice3",          NULL);
-	js_device[3]                   = conf.GetStringDup("Unix::PadDevice4",          NULL);
-	js_device[4]                   = conf.GetStringDup("Unix::PadDevice5",          NULL);
-	js_device[5]                   = conf.GetStringDup("Unix::PadDevice6",          NULL);
-	js_device[6]                   = conf.GetStringDup("Unix::PadDevice7",          NULL);
-	js_device[7]                   = conf.GetStringDup("Unix::PadDevice8",          NULL);
+	js_device[0]                   = conf.GetStringDup("Unix::PadDevice1",          "/dev/input/js0");
+	js_device[1]                   = conf.GetStringDup("Unix::PadDevice2",          "/dev/input/js1");
+	js_device[2]                   = conf.GetStringDup("Unix::PadDevice3",          "/dev/input/js2");
+	js_device[3]                   = conf.GetStringDup("Unix::PadDevice4",          "/dev/input/js3");
+	js_device[4]                   = conf.GetStringDup("Unix::PadDevice5",          "/dev/input/js4");
+	js_device[5]                   = conf.GetStringDup("Unix::PadDevice6",          "/dev/input/js5");
+	js_device[6]                   = conf.GetStringDup("Unix::PadDevice7",          "/dev/input/js6");
+	js_device[7]                   = conf.GetStringDup("Unix::PadDevice8",          "/dev/input/js7");
 #endif
 
 #ifdef USE_THREADS
