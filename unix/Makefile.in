@@ -11,7 +11,7 @@ OBJECTS    = ../apu/apu.o ../apu/bapu/dsp/sdsp.o ../apu/bapu/dsp/SPC_DSP.o ../ap
 DEFS       = -DMITSHM
 
 ifdef S9XDEBUGGER
-OBJECTS   += ../debug.o ../fxdbg.o
+OBJECTS   += ../debug.o ../fxdbg.o debugger.o
 endif
 
 ifdef S9XNETPLAY

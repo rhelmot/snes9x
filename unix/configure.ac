@@ -152,6 +152,7 @@ AC_ARG_ENABLE([debugger],
 if test "x$enable_debugger" = "xyes"; then
 	S9XDEBUGGER="S9XDEBUGGER=1"
 	S9XDEFS="$S9XDEFS -DDEBUGGER"
+	S9XLIBS="$S9XLIBS -lreadline"
 fi
 
 # Enable netplay support if requested.
