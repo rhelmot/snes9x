@@ -202,6 +202,7 @@
 #include "wsnes9x.h"
 #include "win32_sound.h"
 #include "win32_display.h"
+#include "debugger.h"
 #include "CCGShader.h"
 #include "../snes9x.h"
 #include "../memmap.h"
@@ -258,7 +259,7 @@ extern SNPServer NPServer;
 __int64 PCBase, PCFrameTime, PCFrameTimeNTSC, PCFrameTimePAL, PCStart, PCEnd;
 DWORD PCStartTicks, PCEndTicks;
 
-INT_PTR CALLBACK  DlgSP7PackConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
+INT_PTR CALLBACK DlgSP7PackConfig(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgSoundConf(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgInfoProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK DlgAboutProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -1555,7 +1556,6 @@ static bool startingMovie = false;
 
 HWND cheatSearchHWND = NULL;
 
-
 #define MOVIE_LOCKED_SETTING	if(S9xMovieActive()) {MessageBox(GUI.hWnd,TEXT("That setting is locked while a movie is active."),TEXT("Notice"),MB_OK|MB_ICONEXCLAMATION); break;}
 
 LRESULT CALLBACK WinProc(
@@ -1889,16 +1889,16 @@ LRESULT CALLBACK WinProc(
 			}
 
 		case ID_OPTIONS_JOYPAD:
-            RestoreGUIDisplay ();
+			RestoreGUIDisplay ();
 			DialogBox(g_hInst, MAKEINTRESOURCE(IDD_INPUTCONFIG), hWnd, DlgInputConfig);
-            RestoreSNESDisplay ();
-            break;
+			RestoreSNESDisplay ();
+			break;
 
 		case ID_OPTIONS_KEYCUSTOM:
-            RestoreGUIDisplay ();
+			RestoreGUIDisplay ();
 			DialogBox(g_hInst, MAKEINTRESOURCE(IDD_KEYCUSTOM), hWnd, DlgHotkeyConfig);
-            RestoreSNESDisplay ();
-            break;
+			RestoreSNESDisplay ();
+			break;
 
 		case ID_EMULATION_BACKGROUNDINPUT:
 			GUI.BackgroundInput = !GUI.BackgroundInput;
@@ -1975,21 +1975,21 @@ LRESULT CALLBACK WinProc(
 			break;
 
 		case ID_FILE_EXIT:
-            S9xSetPause (PAUSE_EXIT);
-            PostMessage (hWnd, WM_DESTROY, 0, 0);
-            break;
+			S9xSetPause (PAUSE_EXIT);
+			PostMessage (hWnd, WM_DESTROY, 0, 0);
+			break;
 
 		case ID_WINDOW_HIDEMENUBAR:
-            if( GetMenu( GUI.hWnd) == NULL)
-                SetMenu( GUI.hWnd, GUI.hMenu);
-            else
-                SetMenu( GUI.hWnd, NULL);
-            break;
+			if( GetMenu( GUI.hWnd) == NULL)
+				SetMenu( GUI.hWnd, GUI.hMenu);
+			else
+				SetMenu( GUI.hWnd, NULL);
+			break;
 
 #ifdef NETPLAY_SUPPORT
 		case ID_NETPLAY_SERVER:
-            S9xRestoreWindowTitle ();
-            EnableServer (!Settings.NetPlayServer);
+			S9xRestoreWindowTitle ();
+			EnableServer (!Settings.NetPlayServer);
 			if(Settings.NetPlayServer)
 			{
 				TCHAR localhostmsg [512];
@@ -2008,38 +2008,38 @@ LRESULT CALLBACK WinProc(
 					MessageBox(GUI.hWnd,localhostmsg,TEXT("Note"),MB_OK);
 				}
 			}
-            break;
-        case ID_NETPLAY_CONNECT:
-            RestoreGUIDisplay ();
+			break;
+		case ID_NETPLAY_CONNECT:
+			RestoreGUIDisplay ();
 			if(1<=DialogBoxParam(g_hInst, MAKEINTRESOURCE(IDD_NETCONNECT), hWnd, DlgNetConnect,(LPARAM)&hostname))
 
-            {
+			{
 
 
 				S9xSetPause (PAUSE_NETPLAY_CONNECT);
 
 				if (!S9xNPConnectToServer (_tToChar(hostname), Settings.Port,
 					Memory.ROMName))
-                {
-                    S9xClearPause (PAUSE_NETPLAY_CONNECT);
-                }
-            }
+				{
+					S9xClearPause (PAUSE_NETPLAY_CONNECT);
+				}
+			}
 
 			RestoreSNESDisplay ();
-            break;
-        case ID_NETPLAY_DISCONNECT:
-            if (Settings.NetPlay)
-            {
-                Settings.NetPlay = FALSE;
-                S9xNPDisconnect ();
-            }
-            if (Settings.NetPlayServer)
-            {
-                Settings.NetPlayServer = FALSE;
-                S9xNPStopServer ();
-            }
-            break;
-        case ID_NETPLAY_OPTIONS:
+			break;
+		case ID_NETPLAY_DISCONNECT:
+			if (Settings.NetPlay)
+			{
+				Settings.NetPlay = FALSE;
+				S9xNPDisconnect ();
+			}
+			if (Settings.NetPlayServer)
+			{
+				Settings.NetPlayServer = FALSE;
+				S9xNPStopServer ();
+			}
+			break;
+		case ID_NETPLAY_OPTIONS:
 			{
 				bool8 old_netplay_server = Settings.NetPlayServer;
 				RestoreGUIDisplay ();
@@ -2055,26 +2055,26 @@ LRESULT CALLBACK WinProc(
 				RestoreSNESDisplay ();
 				break;
 			}
-        case ID_NETPLAY_SYNC:
-            S9xNPServerQueueSyncAll ();
-            break;
-        case ID_NETPLAY_ROM:
-            if (NPServer.SyncByReset)
-            {
+		case ID_NETPLAY_SYNC:
+			S9xNPServerQueueSyncAll ();
+			break;
+		case ID_NETPLAY_ROM:
+			if (NPServer.SyncByReset)
+			{
 			if (MessageBox (GUI.hWnd, TEXT(WINPROC_NET_RESTART), SNES9X_WARN,
 											MB_OKCANCEL | MB_ICONWARNING) == IDCANCEL)
 											break;
-            }
-            S9xNPServerQueueSendingROMImage ();
-            break;
-        case ID_NETPLAY_SEND_ROM_ON_CONNECT:
-            NPServer.SendROMImageOnConnect ^= TRUE;
-            break;
-        case ID_NETPLAY_SYNC_BY_RESET:
-            NPServer.SyncByReset ^= TRUE;
-            break;
+			}
+			S9xNPServerQueueSendingROMImage ();
+			break;
+		case ID_NETPLAY_SEND_ROM_ON_CONNECT:
+			NPServer.SendROMImageOnConnect ^= TRUE;
+			break;
+		case ID_NETPLAY_SYNC_BY_RESET:
+			NPServer.SyncByReset ^= TRUE;
+			break;
 #endif
-        case ID_SOUND_8000HZ:
+		case ID_SOUND_8000HZ:
 		case ID_SOUND_11025HZ:
 		case ID_SOUND_16000HZ:
 		case ID_SOUND_22050HZ:
@@ -2083,13 +2083,13 @@ LRESULT CALLBACK WinProc(
 		case ID_SOUND_44100HZ:
 		case ID_SOUND_48000HZ:
 		case ID_SOUND_32000HZ:
-            for( i = 0; i < COUNT(SoundRates); i ++)
+			for( i = 0; i < COUNT(SoundRates); i ++)
 				if (SoundRates[i].ident == (int) wParam)
 				{
-                    Settings.SoundPlaybackRate = SoundRates [i].rate;
+					Settings.SoundPlaybackRate = SoundRates [i].rate;
 					GUI.Mute = false;
 					ReInitSound();
-                    break;
+					break;
 				}
 				break;
 
@@ -2147,37 +2147,37 @@ LRESULT CALLBACK WinProc(
 			break;
 
 
-        case ID_CHANNELS_CHANNEL1: S9xToggleSoundChannel(0); break;
-        case ID_CHANNELS_CHANNEL2: S9xToggleSoundChannel(1); break;
-        case ID_CHANNELS_CHANNEL3: S9xToggleSoundChannel(2); break;
-        case ID_CHANNELS_CHANNEL4: S9xToggleSoundChannel(3); break;
-        case ID_CHANNELS_CHANNEL5: S9xToggleSoundChannel(4); break;
-        case ID_CHANNELS_CHANNEL6: S9xToggleSoundChannel(5); break;
-        case ID_CHANNELS_CHANNEL7: S9xToggleSoundChannel(6); break;
-        case ID_CHANNELS_CHANNEL8: S9xToggleSoundChannel(7); break;
-        case ID_CHANNELS_ENABLEALL: S9xToggleSoundChannel(8); break;
+		case ID_CHANNELS_CHANNEL1: S9xToggleSoundChannel(0); break;
+		case ID_CHANNELS_CHANNEL2: S9xToggleSoundChannel(1); break;
+		case ID_CHANNELS_CHANNEL3: S9xToggleSoundChannel(2); break;
+		case ID_CHANNELS_CHANNEL4: S9xToggleSoundChannel(3); break;
+		case ID_CHANNELS_CHANNEL5: S9xToggleSoundChannel(4); break;
+		case ID_CHANNELS_CHANNEL6: S9xToggleSoundChannel(5); break;
+		case ID_CHANNELS_CHANNEL7: S9xToggleSoundChannel(6); break;
+		case ID_CHANNELS_CHANNEL8: S9xToggleSoundChannel(7); break;
+		case ID_CHANNELS_ENABLEALL: S9xToggleSoundChannel(8); break;
 
 		case ID_SOUND_NOSOUND:
 			S9xSetSoundMute(!GUI.Mute);
 			GUI.Mute = !GUI.Mute;
-            break;
+			break;
 
-        case ID_SOUND_STEREO:
-            Settings.Stereo = !Settings.Stereo;
-            ReInitSound();
-            break;
-        case ID_SOUND_REVERSE_STEREO:
-            Settings.ReverseStereo = !Settings.ReverseStereo;
-            break;
-        case ID_SOUND_16BIT:
-            Settings.SixteenBitSound = !Settings.SixteenBitSound;
-            ReInitSound();
-            break;
-        case ID_SOUND_SYNC:
-            Settings.SoundSync = !Settings.SoundSync;
+		case ID_SOUND_STEREO:
+			Settings.Stereo = !Settings.Stereo;
+			ReInitSound();
+			break;
+		case ID_SOUND_REVERSE_STEREO:
+			Settings.ReverseStereo = !Settings.ReverseStereo;
+			break;
+		case ID_SOUND_16BIT:
+			Settings.SixteenBitSound = !Settings.SixteenBitSound;
+			ReInitSound();
+			break;
+		case ID_SOUND_SYNC:
+			Settings.SoundSync = !Settings.SoundSync;
 			S9xDisplayStateChange (WINPROC_SYNC_SND, Settings.SoundSync);
-            break;
-        case ID_SOUND_OPTIONS:
+			break;
+		case ID_SOUND_OPTIONS:
 			{
 				RestoreGUIDisplay ();
 				if(1<=DialogBoxParam(g_hInst,MAKEINTRESOURCE(IDD_SOUND_OPTS),hWnd,DlgSoundConf, (LPARAM)&Settings))
@@ -2261,7 +2261,7 @@ LRESULT CALLBACK WinProc(
 			Settings.FrameAdvance = false;
 			GUI.FrameAdvanceJustPressed = 0;
 			break;
-        case ID_FILE_LOAD0:
+		case ID_FILE_LOAD0:
 			FreezeUnfreeze (0, FALSE);
 			break;
 		case ID_FILE_LOAD1:
@@ -2291,8 +2291,8 @@ LRESULT CALLBACK WinProc(
 		case ID_FILE_LOAD9:
 			FreezeUnfreeze (9, FALSE);
 			break;
-        case ID_FILE_SAVE0:
-            FreezeUnfreeze (0, TRUE);
+		case ID_FILE_SAVE0:
+			FreezeUnfreeze (0, TRUE);
 			break;
 		case ID_FILE_SAVE1:
 			FreezeUnfreeze (1, TRUE);
@@ -2390,8 +2390,21 @@ LRESULT CALLBACK WinProc(
 			ICPU.FrameAdvanceCount = 1;
 			Settings.Paused = FALSE;
 			break;
-		case ID_DEBUG_APU_TRACE:
-			spc_core->debug_toggle_trace();
+		//case ID_DEBUG_APU_TRACE:
+			//spc_core->debug_toggle_trace();
+			//break;
+		case ID_DEBUG_WINDOW:
+			RestoreGUIDisplay();
+			if (!debuggerHWND) {
+				debuggerHWND = CreateDialog(g_hInst, MAKEINTRESOURCE(IDD_DEBUGGER), hWnd, DlgDebugger); // non-modal/modeless
+				ShowWindow(debuggerHWND, SW_SHOW);
+			}
+			else // already open so just reactivate the window
+			{
+				SetActiveWindow(debuggerHWND);
+			}
+			RestoreSNESDisplay();
+			S9xStartDebug();
 			break;
 #endif
 		case IDM_ROM_INFO:
@@ -3412,6 +3425,7 @@ int WINAPI WinMain(
 	void InitSnes9X (void);
 	InitSnes9X ();
 
+
 	if(GUI.FullScreen) {
 		GUI.FullScreen = false;
 		ToggleFullScreen();
@@ -3537,6 +3551,9 @@ int WINAPI WinMain(
 #ifdef NETPLAY_SUPPORT
 			|| Settings.NetPlay
 #endif
+#ifdef DEBUGGER
+			|| (CPU.Flags & (DEBUG_MODE_FLAG | SINGLE_STEP_FLAG))
+#endif
 			)
 			{
 				run_loop=true;
@@ -3607,12 +3624,6 @@ int WINAPI WinMain(
 #ifdef NETPLAY_SUPPORT
         }
 #endif
-        if (CPU.Flags & DEBUG_MODE_FLAG)
-        {
-            Settings.Paused = TRUE;
-            Settings.FrameAdvance = false;
-            CPU.Flags &= ~DEBUG_MODE_FLAG;
-        }
         if (GUI.CursorTimer)
         {
             if (--GUI.CursorTimer == 0)
@@ -3920,8 +3931,8 @@ static void CheckMenuStates ()
 #ifdef DEBUGGER
     mii.fState = (CPU.Flags & TRACE_FLAG) ? MFS_CHECKED : MFS_UNCHECKED;
     SetMenuItemInfo (GUI.hMenu, ID_DEBUG_TRACE, FALSE, &mii);
-	mii.fState = (spc_core->debug_is_enabled()) ? MFS_CHECKED : MFS_UNCHECKED;
-    SetMenuItemInfo (GUI.hMenu, ID_DEBUG_APU_TRACE, FALSE, &mii);
+	//mii.fState = (spc_core->debug_is_enabled()) ? MFS_CHECKED : MFS_UNCHECKED;
+    //SetMenuItemInfo (GUI.hMenu, ID_DEBUG_APU_TRACE, FALSE, &mii);
 #endif
 
 	mii.fState = (!Settings.StopEmulation) ? MFS_ENABLED : MFS_DISABLED;
@@ -9369,7 +9380,7 @@ INT_PTR CALLBACK DlgCheatSearch(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
 		EndPaint (hDlg, &ps);
 		}
 		return true;
-	case WM_NOTIFY:
+		case WM_NOTIFY:
 		{
 			static int selectionMarkOverride = -1;
 			static int foundItemOverride = -1;

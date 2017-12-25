@@ -210,6 +210,9 @@ struct SDebug
 		uint8	Bank;
 		uint16	Address;
 	}	Unassemble;
+	int break_reason;
+	int break_number;
+	uint8 break_initval;
 };
 
 #define ENSURE_TRACE_OPEN(fp, file, mode) \
@@ -250,7 +253,7 @@ void S9xDebugContinue();
 void S9xDebugFrameAdvance();
 void S9xDebugStepOut();
 
-void S9xStartDebug (void);
+void S9xStartDebug (int type=0, int which=0);
 void S9xStopDebug (void);
 void S9xDebugInteract (void);
 void S9xDebugCommand (const char *, std::ostream &, bool=false);
@@ -259,6 +262,10 @@ void S9xSA1Trace (void);
 void S9xTraceMessage (const char *);
 void S9xTraceFormattedMessage (const char *, ...);
 void S9xPrintHVPosition (char *);
+
+void S9xLoadDebugSymbols(char *);
+void S9xDebugLoadLabels(char *);
+void S9xDebugLoadLines(char *);
 
 #endif
 

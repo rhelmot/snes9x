@@ -238,7 +238,7 @@ void S9xMainLoop (void)
 				for (int Break = 0; Break != 6; Break++) {
 					if (S9xBreakpoint[Break].Enabled &&
 						S9xBreakpoint[Break].Address == ((uint32) Registers.PCw | ((uint32) Registers.PB << 16))) {
-						S9xStartDebug();
+						S9xStartDebug(1, Break);
 						break;
 					}
 				}

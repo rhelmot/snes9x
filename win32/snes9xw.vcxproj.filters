@@ -240,6 +240,8 @@
     <ClInclude Include="..\filter\xbrz.h">
       <Filter>Filter</Filter>
     </ClInclude>
+    <ClInclude Include="guicon.h" />
+    <ClInclude Include="debugger.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\bsx.cpp">
@@ -533,6 +535,7 @@
     <ClCompile Include="..\filter\xbrz.cpp">
       <Filter>Filter</Filter>
     </ClCompile>
+    <ClCompile Include="debugger.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="rsrc\nodrop.cur">

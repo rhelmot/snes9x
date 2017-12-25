@@ -181,6 +181,9 @@
 #include <stdarg.h>
 #include <iomanip>
 #include <iostream>
+#include <string>
+#include <map>
+#include <vector>
 #include "snes9x.h"
 #include "memmap.h"
 #include "cpuops.h"
@@ -198,7 +201,7 @@ FILE		*trace = NULL, *trace2 = NULL;
 
 struct SBreakPoint	S9xBreakpoint[6];
 struct SWatchPoint	S9xWatchpoint[6];
-struct SDebug	Debug = { { 0, 0 },{ 0, 0 } };
+struct SDebug	Debug = { { 0, 0 },{ 0, 0 },0,0,0 };
 int step_depth;
 
 static const char	*HelpMessage[] =
@@ -292,6 +295,59 @@ static uint8 debug_sa1_op_print (char *, uint8, uint16);
 static void debug_print_window (std:: ostream &, uint8 *);
 static const char * debug_clip_fn (int);
 
+static std::map<std::string, uint32> debug_labels;
+static std::map<std::string, std::vector<uint32> > debug_lines;
+
+void S9xDebugLoadLabels(char *label_filename) {
+	FILE *fp = fopen(label_filename, "rb");
+	if (!fp) {
+		perror("Couldn't open labels file");
+		return;
+	}
+
+	while (!feof(fp)) {
+		char label[512];
+		uint32 addr;
+		if (fscanf(fp, "%s %x\n", label, &addr) == 2) {
+			debug_labels.insert(std::pair<std::string, uint32>(std::string(label), addr));
+		} else {
+			fprintf(stderr, "malformed labels file %s\n", label_filename);
+			return;
+		}
+	}
+	fclose(fp);
+}
+
+void S9xDebugLoadLines(char *lines_filename) {
+	FILE *fp = fopen(lines_filename, "rb");
+	if (!fp) {
+		perror("Couldn't open lines file");
+		return;
+	}
+
+	while (!feof(fp)) {
+		char filename[PATH_MAX];
+		int num_lines;
+		if (fscanf(fp, "%s %d\n", filename, &num_lines) == 2) {
+			std::string str_filename(filename);
+			debug_lines.insert(std::pair<std::string, std::vector<uint32> >(str_filename, std::vector<uint32>(num_lines)));
+			auto &addr_vec = debug_lines.find(str_filename)->second;
+			for (int line = 0; line < num_lines; line++) {
+				uint32 addr;
+				if (fscanf(fp, "%x\n", &addr) == 1) {
+					addr_vec[line] = addr;
+				} else {
+					fprintf(stderr, "malformed lines file %s (address line)\n", lines_filename);
+					return;
+				}
+			}
+		} else {
+			fprintf(stderr, "malformed lines file %s (filename line)\n", lines_filename);
+			return;
+		}
+	}
+	fclose(fp);
+}
 
 uint8 S9xDebugGetByte (uint32 Address)
 {
@@ -2164,6 +2220,10 @@ void S9xDebugPrintWatchpoints (std::ostream &out) {
 }
 
 int S9xSetBreakpoint(uint32 addr) {
+	if (addr > 0xFFFFFF) {
+		return -2;
+	}
+
 	int empty = -1;
 	for (int i = 0; i < 5; i++) {
 		if (S9xBreakpoint[i].Address == addr && S9xBreakpoint[i].Enabled) {
@@ -2179,6 +2239,28 @@ int S9xSetBreakpoint(uint32 addr) {
 		CPU.Flags |= BREAK_FLAG;
 	}
 	return empty;
+}
+
+int S9xSetBreakpoint(char *filename, unsigned int line) {
+	auto lookup = debug_lines.find(std::string(filename));
+	if (lookup == debug_lines.end()) {
+		return -4;
+	}
+
+	if (line - 1 >= lookup->second.size()) {
+		return -5;
+	}
+
+	return S9xSetBreakpoint(lookup->second[line - 1]);
+}
+
+int S9xSetBreakpoint(char *label) {
+	auto lookup = debug_labels.find(std::string(label));
+	if (lookup == debug_labels.end()) {
+		return -6;
+	}
+
+	return S9xSetBreakpoint(lookup->second);
 }
 
 int S9xSetWatchpoint(uint32 addr, uint8 type) {
@@ -2514,21 +2596,35 @@ void S9xDebugCommand (const char *Line, std::ostream &out, bool is_redo)
 
 	else if (*Line == 'b' || *Line == 'B') { // Break
 		uint32 addr;
-		if (sscanf(Line, "%*s $%x", &addr) != 1) {
-			out << "Usage: break ${addr}\n";
-			return;
+		char buf[512];
+		unsigned int line;
+		int i = -3;
+
+		if (sscanf(Line, "%*s $%x", &addr) == 1) {
+			i = S9xSetBreakpoint(addr);
+		} else if (sscanf(Line, "%*s %s %u", buf, &line) == 2) {
+			i = S9xSetBreakpoint(buf, line);
+		} else if (sscanf(Line, "%*s %s", buf) == 1) {
+			i = S9xSetBreakpoint(buf);
 		}
-		if (addr > 0xFFFFFF) {
-			out << "Invalid address\n";
-			return;
-		}
-		int i = S9xSetBreakpoint(addr);
+
 		if (i == -1) {
 			out << "Too many breakpoints!\n";
+		} else if (i == -2) {
+			out << "Invalid address\n";
+		} else if (i == -3) {
+			out << "Usage: break ${addr}\n";
+		} else if (i == -4) {
+			out << "No such file in debug information\n";
+		} else if (i == -5) {
+			out << "No such line in given file\n";
+		} else if (i == -6) {
+			out << "No such label in debug information\n";
 		} else {
 			sprintf(string, "Set breakpoint %d\n", i);
 			out << string;
 		}
+		return;
 	}
 
 	else if (*Line == 'w' || *Line == 'W') { //Watch
@@ -2545,7 +2641,7 @@ void S9xDebugCommand (const char *Line, std::ostream &out, bool is_redo)
 		if (string[0] == 'r' || string[0] == 'R')
 			type = WATCH_MODE_READ;
 		else if (string[0] == 'w' || string[0] == 'W')
-			type = WATCH_MODE_BOTH;
+			type = WATCH_MODE_WRITE;
 		else if (string[0] == 'b' || string[0] == 'B')
 			type = WATCH_MODE_BOTH;
 		else {

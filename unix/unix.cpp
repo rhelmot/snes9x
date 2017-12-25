@@ -1833,11 +1833,11 @@ int main (int argc, char **argv)
 	else
 	if (rom_filename)
 	{
+		char	s[PATH_MAX + 1];
 		loaded = Memory.LoadROM(rom_filename);
 
 		if (!loaded && rom_filename[0])
 		{
-			char	s[PATH_MAX + 1];
 			char	drive[_MAX_DRIVE + 1], dir[_MAX_DIR + 1], fname[_MAX_FNAME + 1], ext[_MAX_EXT + 1];
 
 			_splitpath(rom_filename, drive, dir, fname, ext);
@@ -1849,7 +1849,12 @@ int main (int argc, char **argv)
 			}
 
 			loaded = Memory.LoadROM(s);
+
 		}
+#ifdef DEBUGGER
+		snprintf(s, PATH_MAX + 1, "%s.debug%s", rom_filename, SLASH_STR);
+		S9xLoadDebugSymbols(s);
+#endif
 	}
 
 	if (!loaded)

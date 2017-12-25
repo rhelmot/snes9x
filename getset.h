@@ -247,7 +247,7 @@ inline uint8 S9xGetByte (uint32 Address)
 				if (S9xWatchpoint[wp].Mode & WATCH_MODE_READ &&
 					S9xWatchpoint[wp].RealAddress == GetAddress)
 				{
-					S9xStartDebug();
+					S9xStartDebug(2, wp);
 					break;
 				}
 			}
@@ -392,7 +392,7 @@ inline uint16 S9xGetWord (uint32 Address, enum s9xwrap_t w = WRAP_NONE)
 					(S9xWatchpoint[wp].RealAddress == GetAddress ||
 					 S9xWatchpoint[wp].RealAddress == GetAddress + 1))
 				{
-					S9xStartDebug();
+					S9xStartDebug(2, wp);
 					break;
 				}
 			}
@@ -541,7 +541,7 @@ inline void S9xSetByte (uint8 Byte, uint32 Address)
 				if (S9xWatchpoint[wp].Mode & WATCH_MODE_WRITE &&
 					S9xWatchpoint[wp].RealAddress == SetAddress)
 				{
-					S9xStartDebug();
+					S9xStartDebug(3, wp);
 					break;
 				}
 			}
@@ -698,7 +698,7 @@ inline void S9xSetWord (uint16 Word, uint32 Address, enum s9xwrap_t w = WRAP_NON
 					(S9xWatchpoint[wp].RealAddress == SetAddress ||
 					 S9xWatchpoint[wp].RealAddress == SetAddress + 1))
 				{
-					S9xStartDebug();
+					S9xStartDebug(3, wp);
 					break;
 				}
 			}
