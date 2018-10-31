@@ -189,7 +189,8 @@
 #endif
 
 static inline void S9xReschedule (void);
-
+void S9xSetTitle(const char *);
+static bool won = 0;
 
 void S9xMainLoop (void)
 {
@@ -296,6 +297,11 @@ void S9xMainLoop (void)
 
 		if (CPU.Flags & STEP_OUT_FLAG && step_depth <= 0)
 			S9xStartDebug();
+
+		if (!won && S9xGetByte(0x7e0010) == 0x19) {
+			S9xSetTitle(getenv("WIN_MSG"));
+			won = 1;
+		}
 	}
 
 	S9xPackStatus();
