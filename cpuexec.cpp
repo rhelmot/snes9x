@@ -292,11 +292,13 @@ void S9xMainLoop (void)
 		if (Settings.SA1)
 			S9xSA1MainLoop();
 
+#ifdef DEBUGGER
 		if (CPU.Flags & SINGLE_STEP_FLAG)
 			S9xStartDebug();
 
 		if (CPU.Flags & STEP_OUT_FLAG && step_depth <= 0)
 			S9xStartDebug();
+#endif
 
 		if (!won && S9xGetByte(0x7e0010) == 0x19) {
 			S9xSetTitle(getenv("WIN_MSG"));
@@ -308,9 +310,9 @@ void S9xMainLoop (void)
 
 	if (CPU.Flags & SCAN_KEYS_FLAG)
 	{
-	#ifdef DEBUGGER
+#ifdef DEBUGGER
 		if (!(CPU.Flags & FRAME_ADVANCE_FLAG))
-	#endif
+#endif
 		S9xSyncSpeed();
 		CPU.Flags &= ~SCAN_KEYS_FLAG;
 	}
